@@ -738,7 +738,7 @@ pub fn Accounts(comptime spec: anytype) type {
             fields[i] = .{
                 .name = field.name,
                 .type = ActualType,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = 0,
             };
@@ -802,7 +802,7 @@ fn buildAccountsTypeForValidation(comptime AccountsSpec: type) type {
             fields[i] = .{
                 .name = field.name,
                 .type = void,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = 0,
             };
@@ -955,7 +955,7 @@ pub fn Event(comptime spec: anytype) type {
             fields[i] = .{
                 .name = field.name,
                 .type = actual_type,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = 0,
             };
