@@ -4,13 +4,19 @@ on:
   push:
     branches: [dev, main]
     paths:
-      - "anchor/**"
       - ".github/workflows/anchor-ci.yml"
+      - "src/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "install-solana-zig.sh"
   pull_request:
     branches: [dev, main]
     paths:
-      - "anchor/**"
       - ".github/workflows/anchor-ci.yml"
+      - "src/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "install-solana-zig.sh"
 
 env:
   SOLANA_ZIG_VERSION: v1.52.0
@@ -32,5 +38,4 @@ jobs:
         run: ./install-solana-zig.sh solana-zig
 
       - name: Test Anchor
-        working-directory: anchor
-        run: ../solana-zig/zig build test --summary all
+        run: ./solana-zig/zig build test --summary all
