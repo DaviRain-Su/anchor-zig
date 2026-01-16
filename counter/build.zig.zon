@@ -10,7 +10,7 @@
         },
         .sol_anchor_zig = .{
             .url = "https://github.com/DaviRain-Su/anchor-zig/archive/refs/heads/main.tar.gz",
-            .hash = "sol_anchor_zig-0.1.0-xwtyYdpyCwCeBCQdaz4WPoX5ae63POhjg0BQC0wfehZ-",
+            .hash = "sol_anchor_zig-0.1.0-xwtyYW15CwD58D-M48Fw7cQSKENkceWqLuLIvb8kb0wh",
         },
     },
     .paths = .{

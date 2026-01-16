@@ -5,7 +5,6 @@ const CounterData = struct {
     count: u64,
 };
 
-
 const Counter = anchor.Account(CounterData, .{
     .discriminator = anchor.accountDiscriminator("Counter"),
     .mut = true,
@@ -65,16 +64,9 @@ fn processInstruction(
     data: []const u8,
 ) sol.ProgramResult {
     const Entry = anchor.ProgramEntry(Program);
-    return Entry.processInstruction(program_id, accountsToInfoSlice(accounts), data, .{});
-}
-
-fn accountsToInfoSlice(accounts: []sol.Account) []const sol.account.Account.Info {
     var infos: [32]sol.account.Account.Info = undefined;
-    const count = @min(accounts.len, infos.len);
-    for (accounts[0..count], 0..) |account, i| {
-        infos[i] = account.info();
-    }
-    return infos[0..count];
+    const infos_slice = anchor.accountsToInfoSlice(accounts, infos[0..]);
+    return Entry.processInstruction(program_id, infos_slice, data, .{});
 }
 
 comptime {
