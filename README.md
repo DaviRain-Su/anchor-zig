@@ -20,6 +20,35 @@ const Counter = anchor.Account(CounterData, .{
 });
 ```
 
+## Typed DSL (No String Field Names)
+
+The typed DSL uses enum literals like `.payer` for compile-time checked field references:
+
+```zig
+const anchor = @import("sol_anchor_zig");
+const sol = anchor.sdk;
+const dsl = anchor.dsl;
+
+const CounterData = struct {
+    count: u64,
+};
+
+const InitializeArgs = struct {
+    initial: u64,
+};
+
+const InitializeAccounts = dsl.Accounts(.{
+    .payer = dsl.SignerMut,
+    .counter = dsl.Init(CounterData, .{ .payer = .payer, .name = "Counter" }),
+});
+
+const Initialize = dsl.Instr("initialize", InitializeAccounts, InitializeArgs);
+
+pub fn initialize(ctx: Initialize.Ctx, args: Initialize.Args) !void {
+    ctx.accounts.counter.data.count = args.initial;
+}
+```
+
 ## Dependencies (build.zig.zon)
 
 Example dependency block using GitHub tarballs:
@@ -36,6 +65,8 @@ Example dependency block using GitHub tarballs:
     },
 },
 ```
+
+Run `./solana-zig/zig fetch https://github.com/DaviRain-Su/anchor-zig/archive/refs/heads/main.tar.gz` to get the latest hash.
 
 ## Build + Test
 
