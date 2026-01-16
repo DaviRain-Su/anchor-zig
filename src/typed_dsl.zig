@@ -993,13 +993,12 @@ fn isIndexableEventFieldType(comptime T: type) bool {
 
 /// Check if a type is an event field wrapper (created by eventField).
 pub fn isEventFieldWrapper(comptime T: type) bool {
-    const info = (T);
-    if (info != .@"struct" and info != .@"enum" and info != .@"union" and info != .opaque) {
+    const info = @typeInfo(T);
+    if (info != .@"struct" and info != .@"enum" and info != .@"union" and info != .@"opaque") {
         return false;
     }
-    return (T, "IS_EVENT_FIELD") and T.IS_EVENT_FIELD;
+    return @hasDecl(T, "IS_EVENT_FIELD") and T.IS_EVENT_FIELD;
 }
-
 /// Unwrap an event field type to get the underlying type.
 ///
 /// If T is `eventField(u64, .{})`, returns `u64`.
