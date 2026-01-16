@@ -733,8 +733,6 @@ pub fn Accounts(comptime spec: anytype) type {
     const IntermediateFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
-            const FieldValue = @field(spec, field.name);
-            const FieldType = FieldValue;
             const MarkerType = @field(spec, field.name);
             const ActualType = resolveMarkerType(MarkerType, SpecType);
             fields[i] = .{
@@ -800,8 +798,6 @@ fn buildAccountsTypeForValidation(comptime AccountsSpec: type) type {
     const ValidationFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
-            const FieldValue = @field(spec, field.name);
-            const FieldType = FieldValue;
             // Use a placeholder type - we just need field names
             fields[i] = .{
                 .name = field.name,
@@ -978,56 +974,6 @@ pub fn Event(comptime spec: anytype) type {
         },
     });
 }
-
-fn isIndexableEventFieldType(comptime T: type) bool {
-    // Boolean
-    if (T == bool) return true;
-
-    // Integer types (8/16/32/64/128/256-bit)
-    const info = @typeInfo(T);
-    if (info == .int) {
-        const bits = info.int.bits;
-        return bits == 8 or bits == 16 or bits == 32 or bits == 64 or bits == 128 or bits == 256;
-    }
-
-    // PublicKey
-    if (T == PublicKey) return true;
-
-    return false;
-}
-
-/// Check if a type is an event field wrapper (created by eventField).
-pub fn isEventFieldWrapper(comptime T: type) bool {
-    return @hasDecl(T, "IS_EVENT_FIELD") and T.IS_EVENT_FIELD;
-}
-
-/// Unwrap an event field type to get the underlying type.
-///
-/// If T is `eventField(u64, .{})`, returns `u64`.
-/// If T is already a plain type, returns T unchanged.
-///
-/// Useful for IDL generation and event serialization.
-pub fn unwrapEventField(comptime T: type) type {
-    if (isEventFieldWrapper(T)) {
-        return T.FieldType;
-    }
-    return T;
-}
-
-/// Get the configuration for an event field.
-///
-/// If T is `eventField(u64, .{ .index = true })`, returns `.{ .index = true }`.
-/// If T is a plain type, returns default config `.{ .index = false }`.
-///
-/// Useful for IDL generation to determine which fields are indexed.
-pub fn eventFieldConfig(comptime T: type) EventField {
-    if (isEventFieldWrapper(T)) {
-        return T.FIELD_CONFIG;
-    }
-    return .{};
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
