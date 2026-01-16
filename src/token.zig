@@ -53,8 +53,8 @@ fn invokeInstruction(
 
 fn buildParams(comptime N: usize, metas: *const [N]AccountMeta) [N]AccountParam {
     var params: [N]AccountParam = undefined;
-    inline for (metas.*, 0..) |*meta, i| {
-        params[i] = sol.instruction.accountMetaToParam(meta);
+    inline for (metas.*, 0..) |_, i| {
+        params[i] = sol.instruction.accountMetaToParam(&metas.*[i]);
     }
     return params;
 }
@@ -537,8 +537,8 @@ pub fn transferMultisig(
 
     var metas = built.accounts;
     var params: [token_instruction.MAX_SIGNERS + 3]AccountParam = undefined;
-    for (metas[0..built.num_accounts], 0..) |*meta, i| {
-        params[i] = sol.instruction.accountMetaToParam(meta);
+    for (metas[0..built.num_accounts], 0..) |_, i| {
+        params[i] = sol.instruction.accountMetaToParam(&metas[i]);
     }
     const ix = Instruction.from(.{
         .program_id = token_program.id,

@@ -448,8 +448,8 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             var params = std.ArrayList(AccountParam).init(self.allocator);
             defer params.deinit();
             try params.ensureTotalCapacity(metas.items.len);
-            for (metas.items) |*meta| {
-                params.appendAssumeCapacity(sol.instruction.accountMetaToParam(meta));
+            for (metas.items, 0..) |_, i| {
+                params.appendAssumeCapacity(sol.instruction.accountMetaToParam(&metas.items[i]));
             }
 
             var infos = std.ArrayList(AccountInfo).init(self.allocator);

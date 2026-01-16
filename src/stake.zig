@@ -43,8 +43,8 @@ fn invokeInstruction(
 
 fn buildParams(comptime N: usize, metas: *const [N]AccountMeta) [N]AccountParam {
     var params: [N]AccountParam = undefined;
-    inline for (metas.*, 0..) |*meta, i| {
-        params[i] = sol.instruction.accountMetaToParam(meta);
+    inline for (metas.*, 0..) |_, i| {
+        params[i] = sol.instruction.accountMetaToParam(&metas.*[i]);
     }
     return params;
 }
