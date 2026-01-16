@@ -1,12 +1,16 @@
 .{
-    .name = .sol_anchor_zig,
+    .name = .__PROJECT_NAME__,
     .version = "0.1.0",
     .minimum_zig_version = "0.15.0",
-    .fingerprint = 0x33c0a0bc61720bc7,
+    .fingerprint = 0x48d43dd61a96fd8f,
     .dependencies = .{
         .solana_program_sdk = .{
             .url = "https://github.com/DaviRain-Su/solana-program-sdk-zig/archive/refs/heads/dev.tar.gz",
             .hash = "solana_program_sdk-0.17.1-wGj9UNYVHAD_uLlbUOhOAMLL08lQOXMm3Ss3Xw4VYvkt",
+        },
+        .sol_anchor_zig = .{
+            .url = "https://github.com/DaviRain-Su/anchor-zig/archive/refs/heads/main.tar.gz",
+            .hash = "sol_anchor_zig-0.1.0-xwtyYfY5CwDLxXR5CIypd_utxTlcaK9UGxQ3bb_NvELH",
         },
     },
     .paths = .{
@@ -14,10 +18,7 @@
         "build.zig.zon",
         "src",
         "README.md",
-        "ROADMAP.md",
-        "CHANGELOG.md",
-        "stories",
-        "template",
-        "scripts",
+        "install-solana-zig.sh",
+        ".github",
     },
 }

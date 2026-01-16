@@ -56,15 +56,13 @@ pub fn eventDiscriminator(comptime name: []const u8) Discriminator {
 /// This is the core discriminator generation function used by both
 /// account and instruction discriminators.
 pub fn sighash(comptime namespace: []const u8, comptime name: []const u8) Discriminator {
-    comptime {
-        // SHA256 comptime computation requires more than default branch quota
-        @setEvalBranchQuota(10000);
+    // SHA256 comptime computation requires more than default branch quota
+    @setEvalBranchQuota(10000);
 
-        const preimage = namespace ++ ":" ++ name;
-        var hash: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(preimage, &hash, .{});
-        return hash[0..DISCRIMINATOR_LENGTH].*;
-    }
+    const preimage = namespace ++ ":" ++ name;
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(preimage, &hash, .{});
+    return hash[0..DISCRIMINATOR_LENGTH].*;
 }
 
 /// Runtime discriminator validation

@@ -1,0 +1,44 @@
+name: Anchor CI
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "src/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "install-solana-zig.sh"
+      - ".github/workflows/anchor-ci.yml"
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - "src/**"
+      - "build.zig"
+      - "build.zig.zon"
+      - "install-solana-zig.sh"
+      - ".github/workflows/anchor-ci.yml"
+
+env:
+  SOLANA_ZIG_VERSION: v1.52.0
+
+jobs:
+  anchor-build:
+    name: Anchor Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache solana-zig
+        uses: actions/cache@v4
+        with:
+          path: solana-zig
+          key: solana-zig-${{ env.SOLANA_ZIG_VERSION }}-linux
+
+      - name: Install solana-zig
+        run: ./install-solana-zig.sh solana-zig
+
+      - name: Build Program
+        run: ./solana-zig/zig build --summary all
+
+      - name: Generate IDL
+        run: ./solana-zig/zig build idl --summary all

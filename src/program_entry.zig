@@ -70,32 +70,32 @@ pub fn ProgramEntry(comptime Program: type) type {
 
             inline for (@typeInfo(Program.instructions).@"struct".decls) |decl| {
                 const InstructionType = @field(Program.instructions, decl.name);
-                if (@TypeOf(InstructionType) != type) continue;
+                if (@TypeOf(InstructionType) == type) {
+                    const expected = discriminator_mod.instructionDiscriminator(decl.name);
+                    if (std.mem.eql(u8, disc, &expected)) {
+                        if (!@hasDecl(Program, decl.name)) {
+                            @compileError("Program is missing handler for instruction: " ++ decl.name);
+                        }
 
-                const expected = discriminator_mod.instructionDiscriminator(decl.name);
-                if (!std.mem.eql(u8, disc, &expected)) continue;
+                        const handler = @field(Program, decl.name);
+                        const Accounts = InstructionType.Accounts;
+                        const Args = InstructionType.Args;
+                        const ctx = try context_mod.parseContext(Accounts, program_id, accounts);
 
-                if (!@hasDecl(Program, decl.name)) {
-                    @compileError("Program is missing handler for instruction: " ++ decl.name);
+                        if (Args == void) {
+                            validateHandlerSignature(handler, decl.name, Accounts, void);
+                            return handler(ctx);
+                        }
+
+                        const args_slice = data[discriminator_mod.DISCRIMINATOR_LENGTH..];
+                        const args = sol.borsh.deserializeExact(Args, args_slice) catch {
+                            return DispatchError.InstructionDidNotDeserialize;
+                        };
+
+                        validateHandlerSignature(handler, decl.name, Accounts, Args);
+                        return handler(ctx, args);
+                    }
                 }
-
-                const handler = @field(Program, decl.name);
-                const Accounts = InstructionType.Accounts;
-                const Args = InstructionType.Args;
-                const ctx = try context_mod.parseContext(Accounts, program_id, accounts);
-
-                if (Args == void) {
-                    validateHandlerSignature(handler, decl.name, Accounts, void);
-                    return handler(ctx);
-                }
-
-                const args_slice = data[discriminator_mod.DISCRIMINATOR_LENGTH..];
-                const args = sol.borsh.deserializeExact(Args, args_slice) catch {
-                    return DispatchError.InstructionDidNotDeserialize;
-                };
-
-                validateHandlerSignature(handler, decl.name, Accounts, Args);
-                return handler(ctx, args);
             }
 
             if (config.fallback) |fallback| {
@@ -170,21 +170,38 @@ fn defaultMapError(err: anyerror) ?ProgramError {
     if (std.meta.stringToEnum(anchor_error.AnchorError, name)) |anchor_err| {
         return ProgramError.custom(anchor_err.toU32());
     }
-    if (std.meta.stringToEnum(DispatchError, name)) |dispatch_err| {
-        return ProgramError.custom(dispatchErrorToAnchor(dispatch_err).toU32());
+    if (err == DispatchError.InstructionMissing) {
+        return ProgramError.custom(dispatchErrorToAnchor(DispatchError.InstructionMissing).toU32());
     }
-    if (std.meta.stringToEnum(BorshError, name)) |_| {
+    if (err == DispatchError.InstructionFallbackNotFound) {
+        return ProgramError.custom(dispatchErrorToAnchor(DispatchError.InstructionFallbackNotFound).toU32());
+    }
+    if (err == DispatchError.InstructionDidNotDeserialize) {
+        return ProgramError.custom(dispatchErrorToAnchor(DispatchError.InstructionDidNotDeserialize).toU32());
+    }
+    if (err == BorshError.UnexpectedEndOfInput or
+        err == BorshError.ExtraDataAfterDeserialize or
+        err == BorshError.InvalidBool or
+        err == BorshError.InvalidOptionTag or
+        err == BorshError.InvalidEnumTag or
+        err == BorshError.InvalidUtf8 or
+        err == BorshError.NanNotAllowed or
+        err == BorshError.BufferTooSmall or
+        err == BorshError.LengthOverflow)
+    {
         return ProgramError.InvalidInstructionData;
     }
     return null;
 }
 
 fn dispatchErrorToAnchor(err: DispatchError) anchor_error.AnchorError {
-    return switch (err) {
-        .InstructionMissing => .InstructionMissing,
-        .InstructionFallbackNotFound => .InstructionFallbackNotFound,
-        .InstructionDidNotDeserialize => .InstructionDidNotDeserialize,
-    };
+    if (err == DispatchError.InstructionMissing) {
+        return anchor_error.AnchorError.InstructionMissing;
+    }
+    if (err == DispatchError.InstructionFallbackNotFound) {
+        return anchor_error.AnchorError.InstructionFallbackNotFound;
+    }
+    return anchor_error.AnchorError.InstructionDidNotDeserialize;
 }
 
 test "program entry dispatches by discriminator" {

@@ -930,6 +930,7 @@ fn isSignerMutType(comptime T: type) bool {
 }
 
 fn isProgramType(comptime T: type) bool {
+    @setEvalBranchQuota(10000);
     return T == UncheckedProgram or std.mem.indexOf(u8, @typeName(T), "Program(") != null;
 }
 

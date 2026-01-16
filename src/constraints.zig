@@ -263,8 +263,8 @@ pub const constraint_typed = struct {
         return .{ .expr = "bytes_hex(" ++ quoteLiteral(value) ++ ")" };
     }
 
-    pub fn pubkeyBytes(comptime bytes: [32]u8) ConstraintExpr {
-        return .{ .expr = "pubkey_bytes(" ++ quoteLiteral(hexEncode(bytes)) ++ ")" };
+    pub fn pubkeyBytes(comptime key_bytes: [32]u8) ConstraintExpr {
+        return .{ .expr = "pubkey_bytes(" ++ quoteLiteral(hexEncode(key_bytes)) ++ ")" };
     }
 
     pub fn pubkeyValue(comptime key: PublicKey) ConstraintExpr {

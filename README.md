@@ -20,6 +20,20 @@ const Counter = anchor.Account(CounterData, .{
 });
 ```
 
+## Project Template
+
+Use the built-in template to scaffold a new Anchor-style program:
+
+```bash
+./scripts/new-anchor-project.sh /path/to/project project_name
+```
+
+To sync template updates into an existing project:
+
+```bash
+./scripts/sync-template.sh /path/to/project
+```
+
 ## IDL + Zig Client
 
 ```zig
