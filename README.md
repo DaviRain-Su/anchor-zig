@@ -2,7 +2,7 @@
 
 Anchor-like framework for Solana program development in Zig.
 
-This package is extracted from `solana_program_sdk` and lives as a subpackage in the same repository. It depends on `solana_program_sdk` via a path dependency.
+This package depends on `solana_program_sdk` and can be consumed via GitHub tarball URLs or local path dependencies.
 
 ## Usage
 
@@ -20,6 +20,33 @@ const Counter = anchor.Account(CounterData, .{
 });
 ```
 
+## Dependencies (build.zig.zon)
+
+Example dependency block using GitHub tarballs:
+
+```zig
+.dependencies = .{
+    .solana_program_sdk = .{
+        .url = "https://github.com/DaviRain-Su/solana-program-sdk-zig/archive/refs/heads/dev.tar.gz",
+        .hash = "solana_program_sdk-0.17.1-wGj9UNYVHAD_uLlbUOhOAMLL08lQOXMm3Ss3Xw4VYvkt",
+    },
+    .sol_anchor_zig = .{
+        .url = "https://github.com/DaviRain-Su/anchor-zig/archive/refs/heads/main.tar.gz",
+        .hash = "sol_anchor_zig-0.1.0-xwtyYdpyCwCeBCQdaz4WPoX5ae63POhjg0BQC0wfehZ-",
+    },
+},
+```
+
+## Build + Test
+
+The template uses `install-solana-zig.sh` to fetch the pinned solana-zig toolchain.
+
+```bash
+./install-solana-zig.sh solana-zig
+./solana-zig/zig build -Drelease
+./solana-zig/zig build test --summary all
+```
+
 ## Project Template
 
 Use the built-in template to scaffold a new Anchor-style program:
@@ -33,6 +60,13 @@ To sync template updates into an existing project:
 ```bash
 ./scripts/sync-template.sh /path/to/project
 ```
+
+## Example Project
+
+The `counter/` project contains a minimal program and a TypeScript client:
+
+- `counter/src/main.zig` for the program
+- `counter/client/src/index.ts` for the JS client integration test
 
 ## IDL + Zig Client
 
@@ -139,9 +173,8 @@ Use `InterfaceConfig.meta_merge` to merge duplicate AccountMeta entries when nee
 ## IDL Output (Build Step)
 
 ```bash
-cd anchor
-../solana-zig/zig build idl \
-  -Didl-program=../path/to/program.zig \
+./solana-zig/zig build idl \
+  -Didl-program=src/main.zig \
   -Didl-output=idl/my_program.json
 ```
 
@@ -556,7 +589,6 @@ const Counter = anchor.Account(CounterData, .{
 });
 ```
 
-
 ## Stake Wrappers + CPI Helpers
 
 Use `anchor.StakeAccount` to parse stake state and `anchor.stake` CPI helpers
@@ -658,10 +690,3 @@ Constraint rules:
 - `token::mint/authority` validates the token account state and token program owner.
 - `mint::authority/freeze_authority/decimals` validates the mint state and token program owner.
 - `associated_token` validates the derived ATA address, token owner field, and token program owner.
-
-## Build & Test
-
-```bash
-cd anchor
-../solana-zig/zig build test --summary all
-```
