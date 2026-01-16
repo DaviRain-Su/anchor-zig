@@ -19,13 +19,57 @@ const IDL_PATH = path.resolve(
 
 const COUNTER_SIZE = 8 + 8;
 
+function formatEventData(value: unknown): unknown {
+  if (value instanceof BN) {
+    return value.toString();
+  }
+  if (value instanceof anchor.web3.PublicKey) {
+    return value.toBase58();
+  }
+  if (Array.isArray(value)) {
+    return value.map(formatEventData);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, val]) => [
+        key,
+        formatEventData(val),
+      ]),
+    );
+  }
+  return value;
+}
+
+
+async function printEvents(
+  connection: anchor.web3.Connection,
+  eventParser: anchor.EventParser,
+  signature: string,
+  label: string,
+): Promise<void> {
+  const logs = await connection.getTransaction(signature, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
+  });
+  const logMessages = logs?.meta?.logMessages || [];
+  const parsedEvents = [...eventParser.parseLogs(logMessages)];
+  for (const event of parsedEvents) {
+    console.log(label, event.name, formatEventData(event.data));
+  }
+  if (parsedEvents.length == 0) {
+    console.log(label, "no events decoded; raw logs:", logMessages);
+  }
+}
+
 async function main(): Promise<void> {
   const url = "http://127.0.0.1:8899";
   const connection = new anchor.web3.Connection(url, "confirmed");
   const walletPath =
     process.env.ANCHOR_WALLET ||
     path.join(os.homedir(), ".config", "solana", "id.json");
-  const secret = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf8")));
+  const secret = Uint8Array.from(
+    JSON.parse(fs.readFileSync(walletPath, "utf8")),
+  );
   const keypair = anchor.web3.Keypair.fromSecretKey(secret);
   const wallet = new anchor.Wallet(keypair);
   const provider = new anchor.AnchorProvider(connection, wallet, {
@@ -39,9 +83,8 @@ async function main(): Promise<void> {
   const eventParser = new anchor.EventParser(PROGRAM_ID, coder);
 
   const counter = anchor.web3.Keypair.generate();
-  const lamports = await connection.getMinimumBalanceForRentExemption(
-    COUNTER_SIZE,
-  );
+  const lamports =
+    await connection.getMinimumBalanceForRentExemption(COUNTER_SIZE);
 
   const createIx = anchor.web3.SystemProgram.createAccount({
     fromPubkey: wallet.publicKey,
@@ -96,6 +139,7 @@ async function main(): Promise<void> {
     [],
   );
   console.log("increment tx:", incSig);
+  await printEvents(connection, eventParser, incSig, "increment event:");
 
   const memoData = instructionCoder.encode("increment_with_memo", {
     amount: new BN(3),
@@ -117,19 +161,7 @@ async function main(): Promise<void> {
     [],
   );
   console.log("increment_with_memo tx:", memoSig);
-
-  const logs = await connection.getTransaction(memoSig, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  const logMessages = logs?.meta?.logMessages || [];
-  const parsedEvents = [...eventParser.parseLogs(logMessages)];
-  for (const event of parsedEvents) {
-    console.log("event:", event.name, event.data);
-  }
-  if (parsedEvents.length === 0) {
-    console.log("no events decoded; raw logs:", logMessages);
-  }
+  await printEvents(connection, eventParser, memoSig, "increment_with_memo event:");
 
   const accountInfo = await connection.getAccountInfo(counter.publicKey);
   if (!accountInfo) {
