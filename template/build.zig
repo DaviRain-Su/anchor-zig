@@ -3,7 +3,9 @@ const solana = @import("solana_program_sdk");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
-    const target = b.resolveTargetQuery(solana.sbf_target);
+    const target = b.standardTargetOptions(.{
+        .default_target = solana.sbf_target,
+    });
 
     const sdk_dep = b.dependency("solana_program_sdk", .{
         .target = target,
