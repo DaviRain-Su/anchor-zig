@@ -647,10 +647,10 @@ pub const ContextError = context.ContextError;
 pub fn accountsToInfoSlice(accounts: anytype, out: []sdk.account.Account.Info) []const sdk.account.Account.Info {
     const AccountsType = @TypeOf(accounts);
     const info = @typeInfo(AccountsType);
-    if (info != .slice) {
+    if (info != .pointer or info.pointer.size != .slice) {
         @compileError("accountsToInfoSlice expects a slice");
     }
-    const Child = info.slice.child;
+    const Child = info.pointer.child;
     if (!@hasDecl(Child, "info")) {
         @compileError("accountsToInfoSlice expects elements with info() method");
     }
