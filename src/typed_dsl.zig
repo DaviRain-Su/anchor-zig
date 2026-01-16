@@ -733,6 +733,8 @@ pub fn Accounts(comptime spec: anytype) type {
     const IntermediateFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
+            const FieldValue = @field(spec, field.name);
+            const FieldType = FieldValue;
             const MarkerType = @field(spec, field.name);
             const ActualType = resolveMarkerType(MarkerType, SpecType);
             fields[i] = .{
@@ -798,6 +800,8 @@ fn buildAccountsTypeForValidation(comptime AccountsSpec: type) type {
     const ValidationFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
+            const FieldValue = @field(spec, field.name);
+            const FieldType = FieldValue;
             // Use a placeholder type - we just need field names
             fields[i] = .{
                 .name = field.name,
@@ -923,7 +927,8 @@ pub fn Event(comptime spec: anytype) type {
     // Validate indexed fields are of supported types
     comptime var index_count: usize = 0;
     inline for (spec_fields) |field| {
-        const FieldType = field.type;
+        const FieldValue = @field(spec, field.name);
+        const FieldType = FieldValue;
         if (@hasDecl(FieldType, "IS_EVENT_FIELD") and FieldType.IS_EVENT_FIELD) {
             const config = FieldType.FIELD_CONFIG;
             if (config.index) {
@@ -946,7 +951,8 @@ pub fn Event(comptime spec: anytype) type {
     const EventFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
-            const FieldType = field.type;
+            const FieldValue = @field(spec, field.name);
+            const FieldType = FieldValue;
             const actual_type = if (@hasDecl(FieldType, "IS_EVENT_FIELD") and FieldType.IS_EVENT_FIELD)
                 FieldType.FieldType
             else
