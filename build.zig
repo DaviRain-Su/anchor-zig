@@ -1,8 +1,10 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
-    const target = b.resolveTargetQuery(@import("solana_program_sdk").sbf_target);
+    const optimize = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = @import("solana_program_sdk").sbf_target,
+    });
 
     const solana_dep = b.dependency("solana_program_sdk", .{
         .target = target,

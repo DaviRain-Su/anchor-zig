@@ -314,6 +314,17 @@ pub fn isUninitialized(info: *const AccountInfo) bool {
         return true;
     }
 
+    // Account with allocated data that is all zeroed is uninitialized
+    if (info.data_len > 0) {
+        const data = info.data[0..info.data_len];
+        for (data) |byte| {
+            if (byte != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     return false;
 }
 

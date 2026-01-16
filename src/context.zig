@@ -22,6 +22,7 @@
 const std = @import("std");
 const seeds_mod = @import("seeds.zig");
 const pda_mod = @import("pda.zig");
+const init_mod = @import("init.zig");
 const sol = @import("solana_program_sdk");
 
 // Import from parent SDK
@@ -384,6 +385,41 @@ pub const LoadAccountsResult = struct {
 /// ```zig
 /// const accounts = try loadAccounts(MyAccounts, account_infos);
 /// ```
+fn loadInitAccount(comptime FieldType: type, info: *const AccountInfo) !FieldType {
+    if (@hasDecl(FieldType, "IS_INIT_IF_NEEDED") and FieldType.IS_INIT_IF_NEEDED) {
+        if (init_mod.isUninitialized(info)) {
+            return FieldType.loadUnchecked(info);
+        }
+        return FieldType.load(info);
+    }
+    return FieldType.loadUnchecked(info);
+}
+
+fn finalizeInitAccounts(
+    comptime Accounts: type,
+    infos: []const AccountInfo,
+    accounts: *Accounts,
+) !void {
+    const fields = @typeInfo(Accounts).@"struct".fields;
+
+    inline for (fields, 0..) |field, i| {
+        const FieldType = field.type;
+        const info = &infos[i];
+
+        if (!@hasDecl(FieldType, "IS_INIT") or !FieldType.IS_INIT) continue;
+
+        if (@hasDecl(FieldType, "IS_INIT_IF_NEEDED") and FieldType.IS_INIT_IF_NEEDED) {
+            if (!init_mod.isUninitialized(info)) {
+                continue;
+            }
+        }
+
+        const account = &@field(accounts.*, field.name);
+        try account.validateInitConstraint(accounts.*);
+        @field(accounts.*, field.name) = try FieldType.init(info);
+    }
+}
+
 pub fn loadAccounts(comptime Accounts: type, infos: []const AccountInfo) !Accounts {
     const fields = @typeInfo(Accounts).@"struct".fields;
 
@@ -397,8 +433,9 @@ pub fn loadAccounts(comptime Accounts: type, infos: []const AccountInfo) !Accoun
         const FieldType = field.type;
         const info = &infos[i];
 
-        // Check if field type has a load function
-        if (@hasDecl(FieldType, "load")) {
+        if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+            @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+        } else if (@hasDecl(FieldType, "load")) {
             @field(accounts, field.name) = try FieldType.load(info);
         } else {
             // For raw AccountInfo pointers
@@ -454,7 +491,13 @@ pub fn loadAccountsWithPda(
                         const resolved_seeds = seeds_mod.resolveComptimeSeeds(seed_specs);
 
                         // Load with PDA validation
-                        if (@hasDecl(FieldType, "loadWithPda")) {
+                        if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+                            const bump = pda_mod.validatePda(info.id, resolved_seeds, program_id) catch {
+                                return error.ConstraintSeeds;
+                            };
+                            bumps.set(field.name, bump);
+                            @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+                        } else if (@hasDecl(FieldType, "loadWithPda")) {
                             const result = try FieldType.loadWithPda(info, resolved_seeds, program_id);
                             @field(accounts, field.name) = result.account;
                             bumps.set(field.name, result.bump);
@@ -464,7 +507,9 @@ pub fn loadAccountsWithPda(
                     } else {
                         // Non-literal seeds: load without PDA validation
                         // User must call loadWithPda manually with resolved seeds
-                        if (@hasDecl(FieldType, "load")) {
+                        if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+                            @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+                        } else if (@hasDecl(FieldType, "load")) {
                             @field(accounts, field.name) = try FieldType.load(info);
                         } else {
                             @field(accounts, field.name) = info;
@@ -472,7 +517,9 @@ pub fn loadAccountsWithPda(
                     }
                 } else {
                     // No seeds defined, normal load
-                    if (@hasDecl(FieldType, "load")) {
+                    if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+                        @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+                    } else if (@hasDecl(FieldType, "load")) {
                         @field(accounts, field.name) = try FieldType.load(info);
                     } else {
                         @field(accounts, field.name) = info;
@@ -480,12 +527,16 @@ pub fn loadAccountsWithPda(
                 }
             } else {
                 // No SEEDS constant, normal load
-                if (@hasDecl(FieldType, "load")) {
+                if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+                    @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+                } else if (@hasDecl(FieldType, "load")) {
                     @field(accounts, field.name) = try FieldType.load(info);
                 } else {
                     @field(accounts, field.name) = info;
                 }
             }
+        } else if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+            @field(accounts, field.name) = try loadInitAccount(FieldType, info);
         } else if (@hasDecl(FieldType, "load")) {
             // No PDA seeds, normal load
             @field(accounts, field.name) = try FieldType.load(info);
@@ -499,6 +550,7 @@ pub fn loadAccountsWithPda(
 
     // Phase 3: Validate constraints after all accounts are loaded
     try validatePhase3Constraints(Accounts, &accounts);
+    try finalizeInitAccounts(Accounts, infos, &accounts);
 
     return .{ .accounts = accounts, .bumps = bumps };
 }
@@ -546,7 +598,9 @@ pub fn loadAccountsWithDependencies(
         const FieldType = field.type;
         const info = &infos[i];
 
-        if (@hasDecl(FieldType, "load")) {
+        if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+            @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+        } else if (@hasDecl(FieldType, "load")) {
             @field(accounts, field.name) = try FieldType.load(info);
         } else {
             @field(accounts, field.name) = info;
@@ -570,7 +624,13 @@ pub fn loadAccountsWithDependencies(
         if (seeds_mod.areAllLiteralSeeds(seed_specs)) {
             const resolved_seeds = seeds_mod.resolveComptimeSeeds(seed_specs);
 
-            if (@hasDecl(FieldType, "loadWithPda")) {
+            if (@hasDecl(FieldType, "IS_INIT") and FieldType.IS_INIT) {
+                const bump = pda_mod.validatePda(info.id, resolved_seeds, program_id) catch {
+                    return error.ConstraintSeeds;
+                };
+                bumps.set(field.name, bump);
+                @field(accounts, field.name) = try loadInitAccount(FieldType, info);
+            } else if (@hasDecl(FieldType, "loadWithPda")) {
                 const result = try FieldType.loadWithPda(info, resolved_seeds, program_id);
                 @field(accounts, field.name) = result.account;
                 bumps.set(field.name, result.bump);
@@ -669,6 +729,7 @@ pub fn loadAccountsWithDependencies(
 
     // Phase 3: Validate constraints after all accounts are loaded
     try validatePhase3Constraints(Accounts, &accounts);
+    try finalizeInitAccounts(Accounts, infos, &accounts);
 
     return .{ .accounts = accounts, .bumps = bumps };
 }
