@@ -949,7 +949,7 @@ pub fn Event(comptime spec: anytype) type {
         for (spec_fields, 0..) |field, i| {
             const FieldValue = @field(spec, field.name);
             const FieldType = FieldValue;
-            const actual_type = if (@hasDecl(FieldType, "IS_EVENT_FIELD") and FieldType.IS_EVENT_FIELD)
+            const actual_type = if (isEventFieldWrapper(FieldType))
                 FieldType.FieldType
             else
                 FieldType;
