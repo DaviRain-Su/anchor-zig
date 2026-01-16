@@ -740,7 +740,7 @@ pub fn Accounts(comptime spec: anytype) type {
                 .type = ActualType,
                 .default_value_ptr = null,
                 .is_comptime = false,
-                .alignment = 0,
+                .alignment = 1,
             };
         }
         break :blk fields;
@@ -804,7 +804,7 @@ fn buildAccountsTypeForValidation(comptime AccountsSpec: type) type {
                 .type = void,
                 .default_value_ptr = null,
                 .is_comptime = false,
-                .alignment = 0,
+                .alignment = 1,
             };
         }
         break :blk fields;
@@ -957,7 +957,7 @@ pub fn Event(comptime spec: anytype) type {
                 .type = actual_type,
                 .default_value_ptr = null,
                 .is_comptime = false,
-                .alignment = 0,
+                .alignment = 1,
             };
         }
         break :blk fields;
