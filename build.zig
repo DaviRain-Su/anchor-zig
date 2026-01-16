@@ -1,8 +1,8 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
+    const target = b.resolveTargetQuery(@import("solana_program_sdk").sbf_target);
 
     const solana_dep = b.dependency("solana_program_sdk", .{
         .target = target,
@@ -17,6 +17,19 @@ pub fn build(b: *std.Build) void {
     });
     anchor_mod.addImport("solana_program_sdk", solana_mod);
 
+    const solana_host_dep = b.dependency("solana_program_sdk", .{
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+    const solana_host_mod = solana_host_dep.module("solana_program_sdk");
+
+    const anchor_host_mod = b.addModule("sol_anchor_zig_host", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+    anchor_host_mod.addImport("solana_program_sdk", solana_host_mod);
+
     const idl_program_path = b.option([]const u8, "idl-program", "Program module path for IDL generation") orelse "src/idl_example.zig";
     const idl_output_path = b.option([]const u8, "idl-output", "IDL output path") orelse "idl/anchor.json";
 
@@ -28,8 +41,8 @@ pub fn build(b: *std.Build) void {
         .target = b.graph.host,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "solana_program_sdk", .module = solana_mod },
-            .{ .name = "sol_anchor_zig", .module = anchor_mod },
+            .{ .name = "solana_program_sdk", .module = solana_host_mod },
+            .{ .name = "sol_anchor_zig", .module = anchor_host_mod },
         },
     });
 
@@ -40,8 +53,8 @@ pub fn build(b: *std.Build) void {
             .target = b.graph.host,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "solana_program_sdk", .module = solana_mod },
-                .{ .name = "sol_anchor_zig", .module = anchor_mod },
+                .{ .name = "solana_program_sdk", .module = solana_host_mod },
+                .{ .name = "sol_anchor_zig", .module = anchor_host_mod },
                 .{ .name = "idl_program", .module = idl_program_mod },
             },
         }),
