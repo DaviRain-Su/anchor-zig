@@ -733,7 +733,7 @@ pub fn Accounts(comptime spec: anytype) type {
     const IntermediateFields = comptime blk: {
         var fields: [spec_fields.len]std.builtin.Type.StructField = undefined;
         for (spec_fields, 0..) |field, i| {
-            const MarkerType = (spec, field.name);
+            const MarkerType = @field(spec, field.name);
             const ActualType = resolveMarkerType(MarkerType, SpecType);
             fields[i] = .{
                 .name = field.name,
