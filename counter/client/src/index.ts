@@ -8,6 +8,10 @@ const PROGRAM_ID = new anchor.web3.PublicKey(
   "4ZfDpKj91bdUw8FuJBGvZu3a9Xis2Ce4QQsjMtwgMG3b",
 );
 
+const MEMO_PROGRAM_ID = new anchor.web3.PublicKey(
+  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+);
+
 const IDL_PATH = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../../idl/counter.json",
@@ -91,6 +95,27 @@ async function main(): Promise<void> {
     [],
   );
   console.log("increment tx:", incSig);
+
+  const memoData = instructionCoder.encode("increment_with_memo", {
+    amount: new BN(3),
+  });
+  if (!memoData) {
+    throw new Error("failed to encode increment_with_memo");
+  }
+  const memoIx = new anchor.web3.TransactionInstruction({
+    programId: PROGRAM_ID,
+    data: memoData,
+    keys: [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: false },
+      { pubkey: counter.publicKey, isSigner: false, isWritable: true },
+      { pubkey: MEMO_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+  });
+  const memoSig = await provider.sendAndConfirm(
+    new anchor.web3.Transaction().add(memoIx),
+    [],
+  );
+  console.log("increment_with_memo tx:", memoSig);
 
   const accountInfo = await connection.getAccountInfo(counter.publicKey);
   if (!accountInfo) {
