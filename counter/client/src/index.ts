@@ -36,6 +36,7 @@ async function main(): Promise<void> {
   const idl = JSON.parse(fs.readFileSync(IDL_PATH, "utf8"));
   const coder = new anchor.BorshCoder(idl);
   const instructionCoder = new anchor.BorshInstructionCoder(idl);
+  const eventParser = new anchor.EventParser(PROGRAM_ID, coder);
 
   const counter = anchor.web3.Keypair.generate();
   const lamports = await connection.getMinimumBalanceForRentExemption(
@@ -116,6 +117,19 @@ async function main(): Promise<void> {
     [],
   );
   console.log("increment_with_memo tx:", memoSig);
+
+  const logs = await connection.getTransaction(memoSig, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
+  });
+  const logMessages = logs?.meta?.logMessages || [];
+  const parsedEvents = [...eventParser.parseLogs(logMessages)];
+  for (const event of parsedEvents) {
+    console.log("event:", event.name, event.data);
+  }
+  if (parsedEvents.length === 0) {
+    console.log("no events decoded; raw logs:", logMessages);
+  }
 
   const accountInfo = await connection.getAccountInfo(counter.publicKey);
   if (!accountInfo) {

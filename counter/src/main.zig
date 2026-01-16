@@ -15,12 +15,6 @@ const IncrementArgs = struct {
     amount: u64,
 };
 
-const CounterEvent = dsl.Event(.{
-    .authority = sol.PublicKey,
-    .amount = u64,
-    .count = u64,
-});
-
 const InitializeAccounts = dsl.Accounts(.{
     .payer = dsl.SignerMut,
     .counter = dsl.Init(CounterData, .{ .payer = .payer, .name = "Counter" }),
@@ -44,6 +38,14 @@ const IncrementWithMemo = dsl.Instr("increment_with_memo", IncrementWithMemoAcco
 pub const Program = struct {
     pub const id = sol.PublicKey.comptimeFromBase58("4ZfDpKj91bdUw8FuJBGvZu3a9Xis2Ce4QQsjMtwgMG3b");
 
+    pub const events = struct {
+        pub const CounterEvent = struct {
+            authority: sol.PublicKey,
+            amount: u64,
+            count: u64,
+        };
+    };
+
     pub const instructions = struct {
         pub const initialize = anchor.Instruction(.{
             .Accounts = Initialize.Accs,
@@ -65,7 +67,7 @@ pub const Program = struct {
 
     pub fn increment(ctx: Increment.Ctx, args: Increment.Args) !void {
         ctx.accounts.counter.data.count += args.amount;
-        ctx.emit(CounterEvent, .{
+        ctx.emit(events.CounterEvent, .{
             .authority = ctx.accounts.authority.key().*,
             .amount = args.amount,
             .count = ctx.accounts.counter.data.count,
@@ -74,7 +76,7 @@ pub const Program = struct {
 
     pub fn increment_with_memo(ctx: IncrementWithMemo.Ctx, args: IncrementWithMemo.Args) !void {
         ctx.accounts.counter.data.count += args.amount;
-        ctx.emit(CounterEvent, .{
+        ctx.emit(events.CounterEvent, .{
             .authority = ctx.accounts.authority.key().*,
             .amount = args.amount,
             .count = ctx.accounts.counter.data.count,
@@ -83,7 +85,7 @@ pub const Program = struct {
         try memo.memo(
             1,
             ctx.accounts.memo_program.toAccountInfo(),
-            &[_]*const sol.account.Account.Info{ ctx.accounts.authority.toAccountInfo() },
+            &[_]*const sol.account.Account.Info{ctx.accounts.authority.toAccountInfo()},
             "counter increment",
             null,
         );
