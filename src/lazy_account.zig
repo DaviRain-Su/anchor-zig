@@ -134,7 +134,6 @@ test "LazyAccount loads on demand and caches data" {
         .is_signer = 0,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     var lazy = try Lazy.load(&info);
@@ -166,7 +165,6 @@ test "LazyAccount saves cached data" {
         .is_signer = 0,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     var lazy = try Lazy.load(&info);

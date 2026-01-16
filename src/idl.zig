@@ -1141,6 +1141,7 @@ const CloseAccounts = struct {
 test "idl: discriminator json size" {
     const allocator = std.testing.allocator;
     const json = try discriminatorJson(allocator, "initialize");
+    defer json.array.deinit();
     try std.testing.expect(json.array.items.len == 8);
 }
 

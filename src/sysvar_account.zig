@@ -15,24 +15,27 @@ pub fn SysvarId(comptime sysvar_id: PublicKey) type {
     };
 }
 
+
+const EPOCH_SCHEDULE_ID = PublicKey.comptimeFromBase58("SysvarEpochSchedu1e111111111111111111111111");
+
 pub const Instructions = SysvarId(sol.INSTRUCTIONS_ID);
 pub const StakeHistory = SysvarId(sol.STAKE_HISTORY_ID);
 
 pub const ClockData = SysvarData(sol.clock.Clock);
 pub const RentData = SysvarData(sol.rent.Rent.Data);
-pub const EpochScheduleData = SysvarData(sol.epoch_schedule.EpochSchedule);
+pub const EpochScheduleData = SysvarDataId(EPOCH_SCHEDULE_ID, sol.epoch_schedule.EpochSchedule);
 pub const SlotHashesData = SysvarData(sol.slot_hashes.SlotHashes);
 pub const SlotHistoryData = SysvarData(sol.slot_history.SlotHistory);
-pub const EpochRewardsData = SysvarData(sol.epoch_rewards.EpochRewards);
-pub const LastRestartSlotData = SysvarData(sol.last_restart_slot.LastRestartSlot);
+pub const EpochRewardsData = SysvarDataId(sol.EPOCH_REWARDS_ID, sol.epoch_rewards.EpochRewards);
+pub const LastRestartSlotData = SysvarDataId(sol.LAST_RESTART_SLOT_ID, sol.last_restart_slot.LastRestartSlot);
 
-pub const ClockSysvar = SysvarId(sol.sysvar_id.CLOCK);
-pub const RentSysvar = SysvarId(sol.sysvar_id.RENT);
-pub const EpochScheduleSysvar = SysvarId(sol.sysvar_id.EPOCH_SCHEDULE);
-pub const SlotHashesSysvar = SysvarId(sol.sysvar_id.SLOT_HASHES);
-pub const SlotHistorySysvar = SysvarId(sol.sysvar_id.SLOT_HISTORY);
-pub const EpochRewardsSysvar = SysvarId(sol.sysvar_id.EPOCH_REWARDS);
-pub const LastRestartSlotSysvar = SysvarId(sol.sysvar_id.LAST_RESTART_SLOT);
+pub const ClockSysvar = SysvarId(sol.CLOCK_ID);
+pub const RentSysvar = SysvarId(sol.RENT_ID);
+pub const EpochScheduleSysvar = SysvarId(EPOCH_SCHEDULE_ID);
+pub const SlotHashesSysvar = SysvarId(sol.SLOT_HASHES_ID);
+pub const SlotHistorySysvar = SysvarId(sol.SLOT_HISTORY_ID);
+pub const EpochRewardsSysvar = SysvarId(sol.EPOCH_REWARDS_ID);
+pub const LastRestartSlotSysvar = SysvarId(sol.LAST_RESTART_SLOT_ID);
 
 /// Sysvar account wrapper with address validation.
 pub fn Sysvar(comptime SysvarType: type) type {
@@ -68,6 +71,42 @@ pub fn Sysvar(comptime SysvarType: type) type {
 /// Sysvar account wrapper with data parsing.
 ///
 /// Reads the sysvar data into the provided type and validates the address.
+
+/// Sysvar account wrapper with data parsing for types without an embedded id.
+///
+/// Reads the sysvar data into the provided type and validates the address.
+pub fn SysvarDataId(comptime sysvar_id: PublicKey, comptime SysvarType: type) type {
+    return struct {
+        const Self = @This();
+
+        pub const SYSVAR_TYPE = SysvarType;
+        pub const ID = sysvar_id;
+
+        info: *const AccountInfo,
+        data: SysvarType,
+
+        pub fn load(info: *const AccountInfo) !Self {
+            if (!info.id.equals(sysvar_id)) {
+                return error.ConstraintAddress;
+            }
+            if (info.data_len < @sizeOf(SysvarType)) {
+                return error.AccountDidNotDeserialize;
+            }
+            const bytes = info.data[0..@sizeOf(SysvarType)];
+            const value = std.mem.bytesToValue(SysvarType, bytes);
+            return .{ .info = info, .data = value };
+        }
+
+        pub fn key(self: Self) *const PublicKey {
+            return self.info.id;
+        }
+
+        pub fn toAccountInfo(self: Self) *const AccountInfo {
+            return self.info;
+        }
+    };
+}
+
 pub fn SysvarData(comptime SysvarType: type) type {
     if (!@hasDecl(SysvarType, "id")) {
         @compileError("Sysvar type must define an id");

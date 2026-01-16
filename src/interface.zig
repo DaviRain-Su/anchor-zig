@@ -15,6 +15,20 @@ const AccountParam = sol.account.Account.Param;
 const Discriminator = discriminator_mod.Discriminator;
 const DISCRIMINATOR_LENGTH = discriminator_mod.DISCRIMINATOR_LENGTH;
 
+pub const OwnedInstruction = struct {
+    allocator: std.mem.Allocator,
+    instruction: Instruction,
+    accounts: []AccountParam,
+    keys: []PublicKey,
+    data: []u8,
+
+    pub fn deinit(self: *const OwnedInstruction) void {
+        self.allocator.free(self.data);
+        self.allocator.free(self.accounts);
+        self.allocator.free(self.keys);
+    }
+};
+
 /// Interface validation config
 pub const InterfaceConfig = struct {
     program_ids: ?[]const PublicKey = null,
@@ -264,7 +278,7 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             self: *Self,
             comptime name: []const u8,
             accounts: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             const instr = getInstructionType(name);
             if (instr.Args != void) {
                 @compileError("instructionNoArgs used with non-void Args");
@@ -277,7 +291,7 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             comptime name: []const u8,
             accounts: anytype,
             args: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             const instr = getInstructionType(name);
             if (instr.Args == void) {
                 @compileError("instruction used with void Args; use instructionNoArgs");
@@ -293,7 +307,7 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             comptime name: []const u8,
             accounts: anytype,
             remaining: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             const instr = getInstructionType(name);
             if (instr.Args != void) {
                 @compileError("instructionNoArgsWithRemaining used with non-void Args");
@@ -307,7 +321,7 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             accounts: anytype,
             args: anytype,
             remaining: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             const instr = getInstructionType(name);
             if (instr.Args == void) {
                 @compileError("instructionWithRemaining used with void Args; use instructionNoArgsWithRemaining");
@@ -384,7 +398,7 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             if (!@hasDecl(Program, "instructions")) {
                 @compileError("Program is missing instructions");
             }
-            if (!@hasField(Program.instructions, name)) {
+            if (!@hasDecl(Program.instructions, name)) {
                 @compileError("Program is missing instruction: " ++ name);
             }
             return @field(Program.instructions, name);
@@ -396,30 +410,57 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
             accounts: anytype,
             args: anytype,
             remaining: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             const instr = getInstructionType(name);
             if (@TypeOf(accounts) != instr.Accounts) {
                 @compileError("instruction accounts must match instruction Accounts");
             }
 
-            var metas = std.ArrayList(AccountMeta).init(self.allocator);
-            defer metas.deinit();
-            try buildAccountMetas(instr.Accounts, accounts, &metas);
-            try appendRemainingAccounts(&metas, remaining);
+            var metas = std.ArrayList(AccountMeta).initCapacity(self.allocator, 0) catch unreachable;
+            defer metas.deinit(self.allocator);
+            try buildAccountMetas(self.allocator, instr.Accounts, accounts, &metas);
+            try appendRemainingAccounts(self.allocator, &metas, remaining);
             try applyMetaMerge(self.allocator, config.meta_merge, &metas);
 
-            const disc = discriminator_mod.instructionDiscriminator(name);
-            if (instr.Args == void) {
-                return Instruction.newWithBytes(self.allocator, self.program_id, disc[0..], metas.items);
+            const keys = try self.allocator.alloc(PublicKey, metas.items.len);
+            errdefer self.allocator.free(keys);
+            const params = try self.allocator.alloc(AccountParam, metas.items.len);
+            errdefer self.allocator.free(params);
+            for (metas.items, 0..) |meta, i| {
+                keys[i] = meta.pubkey;
+                params[i] = .{
+                    .id = &keys[i],
+                    .is_writable = meta.is_writable,
+                    .is_signer = meta.is_signer,
+                };
             }
 
-            const args_bytes = try sol.borsh.serializeAlloc(self.allocator, instr.Args, args);
-            defer self.allocator.free(args_bytes);
-            var data = try self.allocator.alloc(u8, DISCRIMINATOR_LENGTH + args_bytes.len);
-            defer self.allocator.free(data);
-            @memcpy(data[0..DISCRIMINATOR_LENGTH], &disc);
-            @memcpy(data[DISCRIMINATOR_LENGTH..], args_bytes);
-            return Instruction.newWithBytes(self.allocator, self.program_id, data, metas.items);
+            const disc = discriminator_mod.instructionDiscriminator(name);
+            var data: []u8 = undefined;
+            if (instr.Args == void) {
+                data = try self.allocator.alloc(u8, DISCRIMINATOR_LENGTH);
+                @memcpy(data[0..DISCRIMINATOR_LENGTH], &disc);
+            } else {
+                const args_bytes = try sol.borsh.serializeAlloc(self.allocator, instr.Args, args);
+                defer self.allocator.free(args_bytes);
+                data = try self.allocator.alloc(u8, DISCRIMINATOR_LENGTH + args_bytes.len);
+                @memcpy(data[0..DISCRIMINATOR_LENGTH], &disc);
+                @memcpy(data[DISCRIMINATOR_LENGTH..], args_bytes);
+            }
+            errdefer self.allocator.free(data);
+
+            const built_instruction = Instruction.from(.{
+                .program_id = &self.program_id,
+                .accounts = params,
+                .data = data,
+            });
+            return OwnedInstruction{
+                .allocator = self.allocator,
+                .instruction = built_instruction,
+                .accounts = params,
+                .keys = keys,
+                .data = data,
+            };
         }
 
         fn invokeInternal(
@@ -439,23 +480,23 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
                 @compileError("invoke accounts must match instruction Accounts");
             }
 
-            var metas = std.ArrayList(AccountMeta).init(self.allocator);
-            defer metas.deinit();
-            try buildAccountMetas(instr.Accounts, accounts, &metas);
-            try appendRemainingAccounts(&metas, remaining);
+            var metas = std.ArrayList(AccountMeta).initCapacity(self.allocator, 0) catch unreachable;
+            defer metas.deinit(self.allocator);
+            try buildAccountMetas(self.allocator, instr.Accounts, accounts, &metas);
+            try appendRemainingAccounts(self.allocator, &metas, remaining);
             try applyMetaMerge(self.allocator, config.meta_merge, &metas);
 
-            var params = std.ArrayList(AccountParam).init(self.allocator);
-            defer params.deinit();
-            try params.ensureTotalCapacity(metas.items.len);
+            var params = std.ArrayList(AccountParam).initCapacity(self.allocator, 0) catch unreachable;
+            defer params.deinit(self.allocator);
+            try params.ensureTotalCapacity(self.allocator, metas.items.len);
             for (metas.items, 0..) |_, i| {
                 params.appendAssumeCapacity(sol.instruction.accountMetaToParam(&metas.items[i]));
             }
 
-            var infos = std.ArrayList(AccountInfo).init(self.allocator);
-            defer infos.deinit();
-            try buildAccountInfos(instr.Accounts, accounts, &infos);
-            try appendRemainingAccountInfos(&infos, remaining);
+            var infos = std.ArrayList(AccountInfo).initCapacity(self.allocator, 0) catch unreachable;
+            defer infos.deinit(self.allocator);
+            try buildAccountInfos(self.allocator, instr.Accounts, accounts, &infos);
+            try appendRemainingAccountInfos(self.allocator, &infos, remaining);
             try applyInfoMerge(self.allocator, config.meta_merge, &metas, &infos);
 
             const disc = discriminator_mod.instructionDiscriminator(name);
@@ -465,10 +506,11 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
                     .accounts = params.items,
                     .data = disc[0..],
                 });
-                if (signer_seeds) |seeds| {
-                    return cpi.invokeSigned(infos.items, seeds);
-                }
-                return cpi.invoke(infos.items);
+                const result = if (signer_seeds) |seeds|
+                    cpi.invokeSigned(infos.items, seeds)
+                else
+                    cpi.invoke(infos.items);
+                return if (result) |err| .{ .err = err } else .{ .ok = {} };
             }
 
             const args_bytes = try sol.borsh.serializeAlloc(self.allocator, instr.Args, args);
@@ -483,10 +525,11 @@ pub fn Interface(comptime Program: type, comptime config: InterfaceConfig) type 
                 .accounts = params.items,
                 .data = data,
             });
-            if (signer_seeds) |seeds| {
-                return cpi.invokeSigned(infos.items, seeds);
-            }
-            return cpi.invoke(infos.items);
+            const result = if (signer_seeds) |seeds|
+                cpi.invokeSigned(infos.items, seeds)
+            else
+                cpi.invoke(infos.items);
+            return if (result) |err| .{ .err = err } else .{ .ok = {} };
         }
     };
 }
@@ -498,8 +541,8 @@ fn applyMetaMerge(
 ) !void {
     if (strategy == .keep_all) return;
 
-    var merged = std.ArrayList(AccountMeta).init(allocator);
-    defer merged.deinit();
+    var merged = std.ArrayList(AccountMeta).initCapacity(allocator, 0) catch unreachable;
+    defer merged.deinit(allocator);
 
     var seen = std.AutoHashMap([PublicKey.length]u8, usize).init(allocator);
     defer seen.deinit();
@@ -516,11 +559,11 @@ fn applyMetaMerge(
             continue;
         }
         try seen.put(meta.pubkey.bytes, merged.items.len);
-        try merged.append(meta);
+        try merged.append(allocator, meta);
     }
 
     metas.clearRetainingCapacity();
-    try metas.appendSlice(merged.items);
+    try metas.appendSlice(allocator, merged.items);
 }
 
 fn applyInfoMerge(
@@ -531,8 +574,8 @@ fn applyInfoMerge(
 ) !void {
     if (strategy == .keep_all) return;
 
-    var merged = std.ArrayList(AccountInfo).init(allocator);
-    defer merged.deinit();
+    var merged = std.ArrayList(AccountInfo).initCapacity(allocator, 0) catch unreachable;
+    defer merged.deinit(allocator);
 
     var seen = std.AutoHashMap([PublicKey.length]u8, void).init(allocator);
     defer seen.deinit();
@@ -542,7 +585,7 @@ fn applyInfoMerge(
         var found = false;
         for (infos.items) |info| {
             if (info.id.equals(meta.pubkey)) {
-                try merged.append(info);
+                try merged.append(allocator, info);
                 try seen.put(meta.pubkey.bytes, {});
                 found = true;
                 break;
@@ -554,10 +597,11 @@ fn applyInfoMerge(
     }
 
     infos.clearRetainingCapacity();
-    try infos.appendSlice(merged.items);
+    try infos.appendSlice(allocator, merged.items);
 }
 
 fn buildAccountMetas(
+    allocator: std.mem.Allocator,
     comptime Accounts: type,
     accounts: Accounts,
     metas: *std.ArrayList(AccountMeta),
@@ -566,12 +610,13 @@ fn buildAccountMetas(
     inline for (fields) |field| {
         const value = @field(accounts, field.name);
         if (try accountMetaFromValue(value)) |meta| {
-            try metas.append(meta);
+            try metas.append(allocator, meta);
         }
     }
 }
 
 fn buildAccountInfos(
+    allocator: std.mem.Allocator,
     comptime Accounts: type,
     accounts: Accounts,
     infos: *std.ArrayList(AccountInfo),
@@ -580,44 +625,70 @@ fn buildAccountInfos(
     inline for (fields) |field| {
         const value = @field(accounts, field.name);
         if (try accountInfoValueFromValue(value)) |info| {
-            try infos.append(info);
+            try infos.append(allocator, info);
         }
     }
 }
 
-fn appendRemainingAccounts(metas: *std.ArrayList(AccountMeta), remaining: anytype) !void {
+fn appendRemainingAccounts(allocator: std.mem.Allocator, metas: *std.ArrayList(AccountMeta), remaining: anytype) !void {
     const T = @TypeOf(remaining);
+    if (T == @TypeOf(null) or T == void) return;
     if (@typeInfo(T) == .optional) {
         if (remaining == null) return;
-        return try appendRemainingAccounts(metas, remaining.?);
+        return try appendRemainingAccountsSlice(allocator, metas, remaining.?);
     }
+    return try appendRemainingAccountsSlice(allocator, metas, remaining);
+}
 
+fn appendRemainingAccountsSlice(allocator: std.mem.Allocator, metas: *std.ArrayList(AccountMeta), remaining: anytype) !void {
+    const T = @TypeOf(remaining);
     const info = @typeInfo(T);
+    if (info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .array) {
+        for (remaining.*) |item| {
+            if (try accountMetaFromValue(item)) |meta| {
+                try metas.append(allocator, meta);
+            }
+        }
+        return;
+    }
     if (info != .pointer or info.pointer.size != .slice) {
         @compileError("remaining accounts must be a slice");
     }
     for (remaining) |item| {
         if (try accountMetaFromValue(item)) |meta| {
-            try metas.append(meta);
+            try metas.append(allocator, meta);
         }
     }
 }
 
-fn appendRemainingAccountInfos(infos: *std.ArrayList(AccountInfo), remaining: anytype) !void {
+fn appendRemainingAccountInfos(allocator: std.mem.Allocator, infos: *std.ArrayList(AccountInfo), remaining: anytype) !void {
     const T = @TypeOf(remaining);
+    if (T == @TypeOf(null) or T == void) return;
     if (@typeInfo(T) == .optional) {
         if (remaining == null) return;
-        return try appendRemainingAccountInfos(infos, remaining.?);
+        return try appendRemainingAccountInfosSlice(allocator, infos, remaining.?);
     }
+    return try appendRemainingAccountInfosSlice(allocator, infos, remaining);
+}
 
+fn appendRemainingAccountInfosSlice(allocator: std.mem.Allocator, infos: *std.ArrayList(AccountInfo), remaining: anytype) !void {
+    const T = @TypeOf(remaining);
     const info = @typeInfo(T);
+    if (info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .array) {
+        for (remaining.*) |item| {
+            if (try accountInfoValueFromValue(item)) |value| {
+                try infos.append(allocator, value);
+            }
+        }
+        return;
+    }
     if (info != .pointer or info.pointer.size != .slice) {
         @compileError("remaining accounts must be a slice");
     }
 
     for (remaining) |item| {
         if (try accountInfoValueFromValue(item)) |value| {
-            try infos.append(value);
+            try infos.append(allocator, value);
         }
     }
 }
@@ -628,8 +699,17 @@ fn accountMetaFromValue(value: anytype) !?AccountMeta {
         if (value == null) return null;
         return try accountMetaFromValue(value.?);
     }
-    if (@hasDecl(T, "toAccountMeta")) {
-        return value.toAccountMeta();
+    if (@typeInfo(T) == .pointer) {
+        const child = @typeInfo(T).pointer.child;
+        if (@hasDecl(child, "toAccountMeta")) {
+            return value.toAccountMeta();
+        }
+    }
+    const info = @typeInfo(T);
+    if (info == .@"struct" or info == .@"enum" or info == .@"union" or info == .@"opaque") {
+        if (@hasDecl(T, "toAccountMeta")) {
+            return value.toAccountMeta();
+        }
     }
     if (T == AccountMeta) {
         return value;
@@ -646,9 +726,19 @@ fn accountMetaFromValue(value: anytype) !?AccountMeta {
     if (T == *const AccountInfo) {
         return AccountMeta.init(value.id.*, value.is_signer != 0, value.is_writable != 0);
     }
-    if (@hasDecl(T, "toAccountInfo")) {
-        const info_ptr = value.toAccountInfo();
-        return AccountMeta.init(info_ptr.id.*, info_ptr.is_signer != 0, info_ptr.is_writable != 0);
+    if (@typeInfo(T) == .pointer) {
+        const child = @typeInfo(T).pointer.child;
+        if (@hasDecl(child, "toAccountInfo")) {
+            const info_ptr = value.toAccountInfo();
+            return AccountMeta.init(info_ptr.id.*, info_ptr.is_signer != 0, info_ptr.is_writable != 0);
+        }
+    }
+    const info2 = @typeInfo(T);
+    if (info2 == .@"struct" or info2 == .@"enum" or info2 == .@"union" or info2 == .@"opaque") {
+        if (@hasDecl(T, "toAccountInfo")) {
+            const info_ptr = value.toAccountInfo();
+            return AccountMeta.init(info_ptr.id.*, info_ptr.is_signer != 0, info_ptr.is_writable != 0);
+        }
     }
     @compileError("interface accounts must provide AccountMeta, AccountInfo, or toAccountInfo()");
 }
@@ -710,19 +800,19 @@ fn validateAccess(
     }
 }
 
-fn isAllowedProgramId(comptime ids: []const PublicKey, program_id: PublicKey) bool {
-    inline for (ids) |id| {
+fn isAllowedProgramId(ids: []const PublicKey, program_id: PublicKey) bool {
+    for (ids) |id| {
         if (id.equals(program_id)) return true;
     }
     return false;
 }
 
 test "InterfaceProgram accepts allowed ids" {
-    const allowed = [_]PublicKey{
+    const allowed = comptime [_]PublicKey{
         PublicKey.comptimeFromBase58("11111111111111111111111111111111"),
         PublicKey.comptimeFromBase58("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
     };
-    const ProgramType = InterfaceProgram(allowed[0..]);
+    const ProgramType = comptime InterfaceProgram(allowed[0..]);
 
     var owner = PublicKey.default();
     var id = allowed[1];
@@ -736,7 +826,6 @@ test "InterfaceProgram accepts allowed ids" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     _ = try ProgramType.load(&info);
@@ -755,7 +844,6 @@ test "InterfaceProgramAny accepts executable program" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     _ = try InterfaceProgramAny.load(&info);
@@ -774,24 +862,24 @@ test "InterfaceProgramUnchecked accepts non-executable" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     _ = try InterfaceProgramUnchecked.load(&info);
 }
 
 test "InterfaceAccount validates owner list" {
-    const owners = [_]PublicKey{
+    const owners = comptime [_]PublicKey{
         PublicKey.comptimeFromBase58("11111111111111111111111111111111"),
     };
+    const owners_slice = comptime owners[0..];
     const Data = struct { value: u64 };
-    const disc = discriminator_mod.accountDiscriminator("Iface");
-    const Iface = InterfaceAccount(Data, .{ .discriminator = disc, .owners = owners[0..] });
+    const disc = comptime discriminator_mod.accountDiscriminator("Iface");
+    const Iface = comptime InterfaceAccount(Data, .{ .discriminator = disc, .owners = owners_slice });
 
     var owner = owners[0];
     var id = PublicKey.default();
     var lamports: u64 = 1;
-    var buffer: [DISCRIMINATOR_LENGTH + @sizeOf(Data)]u8 = undefined;
+    var buffer: [DISCRIMINATOR_LENGTH + @sizeOf(Data)]u8 align(@alignOf(Data)) = undefined;
     @memcpy(buffer[0..DISCRIMINATOR_LENGTH], &disc);
     const data_ptr: *Data = @ptrCast(@alignCast(buffer[DISCRIMINATOR_LENGTH..].ptr));
     data_ptr.* = .{ .value = 1 };
@@ -805,18 +893,18 @@ test "InterfaceAccount validates owner list" {
         .is_signer = 0,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     _ = try Iface.load(&info);
 }
 
 test "InterfaceAccountInfo validates access rules" {
-    const owners = [_]PublicKey{
+    const owners = comptime [_]PublicKey{
         PublicKey.comptimeFromBase58("11111111111111111111111111111111"),
     };
+    const owners_slice = comptime owners[0..];
     const RawInfo = InterfaceAccountInfo(.{
-        .owners = owners[0..],
+        .owners = owners_slice,
         .mut = true,
         .signer = true,
     });
@@ -834,7 +922,6 @@ test "InterfaceAccountInfo validates access rules" {
         .is_signer = 1,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     _ = try RawInfo.load(&info);
@@ -856,7 +943,6 @@ test "InterfaceAccountInfo enforces executable" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     try std.testing.expectError(error.ConstraintExecutable, RawInfo.load(&info));
@@ -878,7 +964,6 @@ test "InterfaceAccountInfo enforces rent_exempt" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const rent = sol.rent.Rent.getOrDefault();
@@ -915,15 +1000,14 @@ test "Interface builds CPI instruction" {
         .is_signer = 1,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
     const accounts = Accounts{ .authority = &info };
 
     var iface = try Interface(Program, .{}).init(allocator, PublicKey.default());
     const ix = try iface.instruction("deposit", accounts, Args{ .amount = 7 });
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 1), ix.accounts.len);
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 1), ix.instruction.accounts_len);
 }
 
 test "Interface builds CPI instruction with AccountMeta fields" {
@@ -944,12 +1028,12 @@ test "Interface builds CPI instruction with AccountMeta fields" {
 
     var iface = try Interface(Program, .{}).init(allocator, PublicKey.default());
     const ix = try iface.instruction("deposit", accounts, Args{ .amount = 7 });
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 1), ix.accounts.len);
-    try std.testing.expect(ix.accounts[0].pubkey.equals(key));
-    try std.testing.expect(ix.accounts[0].is_signer);
-    try std.testing.expect(!ix.accounts[0].is_writable);
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 1), ix.instruction.accounts_len);
+    try std.testing.expect(ix.instruction.accounts[0].id.*.equals(key));
+    try std.testing.expect(ix.instruction.accounts[0].is_signer);
+    try std.testing.expect(!ix.instruction.accounts[0].is_writable);
 }
 
 test "Interface builds CPI instruction with AccountMetaOverride" {
@@ -978,7 +1062,6 @@ test "Interface builds CPI instruction with AccountMetaOverride" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
     const override = AccountMetaOverride{
         .info = &info,
@@ -989,10 +1072,10 @@ test "Interface builds CPI instruction with AccountMetaOverride" {
 
     var iface = try Interface(Program, .{}).init(allocator, PublicKey.default());
     const ix = try iface.instruction("deposit", accounts, Args{ .amount = 7 });
-    defer ix.deinit(allocator);
-
-    try std.testing.expect(ix.accounts[0].is_signer);
-    try std.testing.expect(ix.accounts[0].is_writable);
+    defer ix.deinit();
+    
+    try std.testing.expect(ix.instruction.accounts[0].is_signer);
+    try std.testing.expect(ix.instruction.accounts[0].is_writable);
 }
 
 test "Interface builds CPI instruction with remaining accounts" {
@@ -1021,7 +1104,6 @@ test "Interface builds CPI instruction with remaining accounts" {
         .is_signer = 1,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
     const accounts = Accounts{ .authority = &info };
 
@@ -1037,15 +1119,14 @@ test "Interface builds CPI instruction with remaining accounts" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
     const remaining = [_]*const AccountInfo{ &rem_info };
 
     var iface = try Interface(Program, .{}).init(allocator, PublicKey.default());
     const ix = try iface.instructionWithRemaining("deposit", accounts, Args{ .amount = 7 }, remaining[0..]);
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 2), ix.accounts.len);
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 2), ix.instruction.accounts_len);
 }
 
 test "Interface builds CPI instruction with remaining AccountMeta" {
@@ -1074,7 +1155,6 @@ test "Interface builds CPI instruction with remaining AccountMeta" {
         .is_signer = 1,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
     const accounts = Accounts{ .authority = &info };
 
@@ -1083,10 +1163,10 @@ test "Interface builds CPI instruction with remaining AccountMeta" {
 
     var iface = try Interface(Program, .{}).init(allocator, PublicKey.default());
     const ix = try iface.instructionWithRemaining("deposit", accounts, Args{ .amount = 7 }, remaining[0..]);
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 2), ix.accounts.len);
-    try std.testing.expect(ix.accounts[1].pubkey.equals(meta.pubkey));
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 2), ix.instruction.accounts_len);
+    try std.testing.expect(ix.instruction.accounts[1].id.*.equals(meta.pubkey));
 }
 
 test "Interface merges duplicate metas" {
@@ -1111,11 +1191,11 @@ test "Interface merges duplicate metas" {
 
     var iface = try Interface(Program, .{ .meta_merge = .merge_duplicates }).init(allocator, PublicKey.default());
     const ix = try iface.instruction("deposit", accounts, Args{ .amount = 7 });
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 1), ix.accounts.len);
-    try std.testing.expect(ix.accounts[0].is_signer);
-    try std.testing.expect(ix.accounts[0].is_writable);
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 1), ix.instruction.accounts_len);
+    try std.testing.expect(ix.instruction.accounts[0].is_signer);
+    try std.testing.expect(ix.instruction.accounts[0].is_writable);
 }
 
 test "Interface merge rejects conflicting flags" {
@@ -1164,7 +1244,7 @@ test "Interface merge keeps same flags without error" {
 
     var iface = try Interface(Program, .{ .meta_merge = .error_on_conflict }).init(allocator, PublicKey.default());
     const ix = try iface.instruction("deposit", accounts, Args{ .amount = 7 });
-    defer ix.deinit(allocator);
-
-    try std.testing.expectEqual(@as(usize, 1), ix.accounts.len);
+    defer ix.deinit();
+    
+    try std.testing.expectEqual(@as(usize, 1), ix.instruction.accounts_len);
 }

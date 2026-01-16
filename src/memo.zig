@@ -107,7 +107,6 @@ test "memo: validated rejects invalid utf8" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
     const invalid = &[_]u8{ 0xC0, 0x00 };
     try std.testing.expectError(

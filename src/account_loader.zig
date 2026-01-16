@@ -121,7 +121,6 @@ test "AccountLoader loads zero-copy account data" {
         .is_signer = 0,
         .is_writable = 1,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const loaded = try Loader.load(&info);

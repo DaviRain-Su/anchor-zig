@@ -8,6 +8,7 @@ const interface_mod = @import("interface.zig");
 
 const AccountInfo = sol.account.Account.Info;
 const Instruction = sol.instruction.Instruction;
+const OwnedInstruction = interface_mod.OwnedInstruction;
 
 /// Remaining account collection errors.
 pub const RemainingError = error{
@@ -43,19 +44,32 @@ fn accountInfoFromValue(value: anytype) ?AccountInfo {
     @compileError("remaining accounts must provide AccountInfo or toAccountInfo()");
 }
 
-fn appendRemainingInfos(list: *std.ArrayList(AccountInfo), remaining: anytype) !void {
+fn appendRemainingInfos(list: *std.ArrayList(AccountInfo), allocator: std.mem.Allocator, remaining: anytype) !void {
     const T = @TypeOf(remaining);
+    if (T == @TypeOf(null) or T == void) return;
     if (@typeInfo(T) == .optional) {
         if (remaining == null) return;
-        return try appendRemainingInfos(list, remaining.?);
+        return try appendRemainingInfosSlice(list, allocator, remaining.?);
     }
-    const info = @typeInfo(T);
+    return try appendRemainingInfosSlice(list, allocator, remaining);
+}
+
+fn appendRemainingInfosSlice(list: *std.ArrayList(AccountInfo), allocator: std.mem.Allocator, remaining: anytype) !void {
+    const info = @typeInfo(@TypeOf(remaining));
+    if (info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .array) {
+        for (remaining.*) |item| {
+            if (accountInfoFromValue(item)) |value| {
+                try list.append(allocator, value);
+            }
+        }
+        return;
+    }
     if (info != .pointer or info.pointer.size != .slice) {
         @compileError("remaining accounts must be a slice");
     }
     for (remaining) |item| {
         if (accountInfoFromValue(item)) |value| {
-            try list.append(value);
+            try list.append(allocator, value);
         }
     }
 }
@@ -66,11 +80,32 @@ fn appendRemainingInfosInto(
     remaining: anytype,
 ) !void {
     const T = @TypeOf(remaining);
+    if (T == @TypeOf(null) or T == void) return;
     if (@typeInfo(T) == .optional) {
         if (remaining == null) return;
-        return try appendRemainingInfosInto(storage, len, remaining.?);
+        return try appendRemainingInfosIntoSlice(storage, len, remaining.?);
     }
-    const info = @typeInfo(T);
+    return try appendRemainingInfosIntoSlice(storage, len, remaining);
+}
+
+fn appendRemainingInfosIntoSlice(
+    storage: []AccountInfo,
+    len: *usize,
+    remaining: anytype,
+) !void {
+    const info = @typeInfo(@TypeOf(remaining));
+    if (info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .array) {
+        for (remaining.*) |item| {
+            if (accountInfoFromValue(item)) |value| {
+                if (len.* >= storage.len) {
+                    return RemainingError.RemainingAccountsOverflow;
+                }
+                storage[len.*] = value;
+                len.* += 1;
+            }
+        }
+        return;
+    }
     if (info != .pointer or info.pointer.size != .slice) {
         @compileError("remaining accounts must be a slice");
     }
@@ -84,6 +119,7 @@ fn appendRemainingInfosInto(
         }
     }
 }
+
 
 /// CPI context builder.
 pub fn CpiContext(comptime Program: type, comptime Accounts: type) type {
@@ -115,13 +151,13 @@ pub fn CpiContextWithConfig(
                 .allocator = allocator,
                 .program = toAccountInfo(program),
                 .accounts = accounts,
-                .remaining_list = std.ArrayList(AccountInfo).init(allocator),
+                .remaining_list = std.ArrayList(AccountInfo).initCapacity(allocator, 0) catch unreachable,
             };
         }
 
         /// Release any memory owned by the context.
         pub fn deinit(self: *Self) void {
-            self.remaining_list.deinit();
+            self.remaining_list.deinit(self.allocator);
         }
 
         fn resolvedRemaining(self: *const Self) ?[]const AccountInfo {
@@ -161,7 +197,7 @@ pub fn CpiContextWithConfig(
             if (self.remaining_storage) |storage| {
                 try appendRemainingInfosInto(storage, &self.remaining_len, remaining);
             } else {
-                try appendRemainingInfos(&self.remaining_list, remaining);
+                try appendRemainingInfos(&self.remaining_list, self.allocator, remaining);
                 self.use_remaining_list = true;
             }
         }
@@ -183,12 +219,12 @@ pub fn CpiContextWithConfig(
         }
 
         /// Build an instruction without args.
-        pub fn instructionNoArgs(self: *const Self, comptime name: []const u8) !Instruction {
+        pub fn instructionNoArgs(self: *const Self, comptime name: []const u8) !OwnedInstruction {
             var iface = try interface_mod.Interface(Program, config).init(
                 self.allocator,
                 self.program.id.*,
             );
-            return try iface.instructionNoArgs(name, self.accounts, self.resolvedRemaining());
+            return try iface.instructionNoArgsWithRemaining(name, self.accounts, self.resolvedRemaining());
         }
 
         /// Build an instruction without args, providing remaining accounts inline.
@@ -196,16 +232,16 @@ pub fn CpiContextWithConfig(
             self: *const Self,
             comptime name: []const u8,
             remaining: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             var iface = try interface_mod.Interface(Program, config).init(
                 self.allocator,
                 self.program.id.*,
             );
-            return try iface.instructionNoArgs(name, self.accounts, remaining);
+            return try iface.instructionNoArgsWithRemaining(name, self.accounts, remaining);
         }
 
         /// Build an instruction with args.
-        pub fn instruction(self: *const Self, comptime name: []const u8, args: anytype) !Instruction {
+        pub fn instruction(self: *const Self, comptime name: []const u8, args: anytype) !OwnedInstruction {
             var iface = try interface_mod.Interface(Program, config).init(
                 self.allocator,
                 self.program.id.*,
@@ -219,7 +255,7 @@ pub fn CpiContextWithConfig(
             comptime name: []const u8,
             args: anytype,
             remaining: anytype,
-        ) !Instruction {
+        ) !OwnedInstruction {
             var iface = try interface_mod.Interface(Program, config).init(
                 self.allocator,
                 self.program.id.*,
@@ -369,7 +405,6 @@ test "CpiContext builds instruction" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     const payer_info = program_info;
@@ -378,8 +413,8 @@ test "CpiContext builds instruction" {
     var ctx = CpiContext(TestProgram, TestAccounts).init(std.testing.allocator, &program_info, accounts);
     defer ctx.deinit();
     const ix = try ctx.instructionNoArgs("ping");
-    defer ix.deinit(std.testing.allocator);
-    try std.testing.expect(ix.data_len == 8);
+    defer ix.deinit();
+    try std.testing.expect(ix.instruction.data_len == 8);
 }
 
 test "CpiContext builds instruction with inline remaining accounts" {
@@ -409,7 +444,6 @@ test "CpiContext builds instruction with inline remaining accounts" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     var rem_id = sol.PublicKey.default();
@@ -425,7 +459,6 @@ test "CpiContext builds instruction with inline remaining accounts" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const accounts = TestAccounts{ .payer = &program_info };
@@ -433,8 +466,8 @@ test "CpiContext builds instruction with inline remaining accounts" {
     defer ctx.deinit();
     const remaining = [_]*const AccountInfo{ &rem_info };
     const ix = try ctx.instructionNoArgsWithRemaining("ping", remaining[0..]);
-    defer ix.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 2), ix.accounts.len);
+    defer ix.deinit();
+    try std.testing.expectEqual(@as(usize, 2), ix.instruction.accounts_len);
 }
 
 test "CpiContext collects remaining accounts with storage pool" {
@@ -464,7 +497,6 @@ test "CpiContext collects remaining accounts with storage pool" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     var rem_id = sol.PublicKey.default();
@@ -480,7 +512,6 @@ test "CpiContext collects remaining accounts with storage pool" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const accounts = TestAccounts{ .payer = &program_info };
@@ -491,8 +522,8 @@ test "CpiContext collects remaining accounts with storage pool" {
     ctx = ctx.withRemainingStorage(storage[0..]);
     try ctx.appendRemaining(&[_]*const AccountInfo{ &rem_info });
     const ix = try ctx.instructionNoArgs("ping");
-    defer ix.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 2), ix.accounts.len);
+    defer ix.deinit();
+    try std.testing.expectEqual(@as(usize, 2), ix.instruction.accounts_len);
 }
 
 test "CpiContext resetRemaining clears collection" {
@@ -522,7 +553,6 @@ test "CpiContext resetRemaining clears collection" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     var rem_id = sol.PublicKey.default();
@@ -538,7 +568,6 @@ test "CpiContext resetRemaining clears collection" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const accounts = TestAccounts{ .payer = &program_info };
@@ -549,8 +578,8 @@ test "CpiContext resetRemaining clears collection" {
     ctx.resetRemaining();
     try ctx.appendRemaining(&[_]*const AccountInfo{ &rem_info });
     const ix = try ctx.instructionNoArgs("ping");
-    defer ix.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 2), ix.accounts.len);
+    defer ix.deinit();
+    try std.testing.expectEqual(@as(usize, 2), ix.instruction.accounts_len);
 }
 
 test "CpiContext invokeWithRemainingResetSigned uses inline seeds" {
@@ -580,7 +609,6 @@ test "CpiContext invokeWithRemainingResetSigned uses inline seeds" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 1,
-        .rent_epoch = 0,
     };
 
     var rem_id = sol.PublicKey.default();
@@ -596,7 +624,6 @@ test "CpiContext invokeWithRemainingResetSigned uses inline seeds" {
         .is_signer = 0,
         .is_writable = 0,
         .is_executable = 0,
-        .rent_epoch = 0,
     };
 
     const accounts = TestAccounts{ .payer = &program_info };

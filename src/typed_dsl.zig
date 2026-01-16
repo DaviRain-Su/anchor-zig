@@ -65,6 +65,13 @@ fn resolveFieldRef(comptime ref: anytype) []const u8 {
     if (RefType == []const u8) return ref;
     if (RefType == @TypeOf(.enum_literal)) return @tagName(ref);
     if (@typeInfo(RefType) == .enum_literal) return @tagName(ref);
+    if (@typeInfo(RefType) == .pointer) {
+        const ptr = @typeInfo(RefType).pointer;
+        if (ptr.size == .one and @typeInfo(ptr.child) == .array) {
+            const array = @typeInfo(ptr.child).array;
+            if (array.child == u8) return ref.*[0..array.len];
+        }
+    }
     @compileError("expected field name: use .field_name or \"field_name\"");
 }
 
@@ -154,6 +161,8 @@ pub const AddressLookupTableProgram = Prog(sol.address_lookup_table.ID);
 // ============================================================================
 
 /// Sysvar account marker that validates the account address matches the expected sysvar.
+const EPOCH_SCHEDULE_ID = PublicKey.comptimeFromBase58("SysvarEpochSchedu1e111111111111111111111111");
+
 pub fn SysvarAccount(comptime sysvar_id: PublicKey) type {
     return struct {
         pub const IS_SYSVAR = true;
@@ -164,39 +173,39 @@ pub fn SysvarAccount(comptime sysvar_id: PublicKey) type {
 
 /// Rent Sysvar marker.
 /// Usage: `.rent = RentSysvar`
-pub const RentSysvar = SysvarAccount(sol.sysvar_id.RENT);
+pub const RentSysvar = SysvarAccount(sol.RENT_ID);
 
 /// Clock Sysvar marker.
 /// Usage: `.clock = ClockSysvar`
-pub const ClockSysvar = SysvarAccount(sol.sysvar_id.CLOCK);
+pub const ClockSysvar = SysvarAccount(sol.CLOCK_ID);
 
 /// Epoch Schedule Sysvar marker.
 /// Usage: `.epoch_schedule = EpochScheduleSysvar`
-pub const EpochScheduleSysvar = SysvarAccount(sol.sysvar_id.EPOCH_SCHEDULE);
+pub const EpochScheduleSysvar = SysvarAccount(EPOCH_SCHEDULE_ID);
 
 /// Slot Hashes Sysvar marker.
 /// Usage: `.slot_hashes = SlotHashesSysvar`
-pub const SlotHashesSysvar = SysvarAccount(sol.sysvar_id.SLOT_HASHES);
+pub const SlotHashesSysvar = SysvarAccount(sol.SLOT_HASHES_ID);
 
 /// Slot History Sysvar marker.
 /// Usage: `.slot_history = SlotHistorySysvar`
-pub const SlotHistorySysvar = SysvarAccount(sol.sysvar_id.SLOT_HISTORY);
+pub const SlotHistorySysvar = SysvarAccount(sol.SLOT_HISTORY_ID);
 
 /// Stake History Sysvar marker.
 /// Usage: `.stake_history = StakeHistorySysvar`
-pub const StakeHistorySysvar = SysvarAccount(sol.sysvar_id.STAKE_HISTORY);
+pub const StakeHistorySysvar = SysvarAccount(sol.STAKE_HISTORY_ID);
 
 /// Epoch Rewards Sysvar marker.
 /// Usage: `.epoch_rewards = EpochRewardsSysvar`
-pub const EpochRewardsSysvar = SysvarAccount(sol.sysvar_id.EPOCH_REWARDS);
+pub const EpochRewardsSysvar = SysvarAccount(sol.EPOCH_REWARDS_ID);
 
 /// Last Restart Slot Sysvar marker.
 /// Usage: `.last_restart_slot = LastRestartSlotSysvar`
-pub const LastRestartSlotSysvar = SysvarAccount(sol.sysvar_id.LAST_RESTART_SLOT);
+pub const LastRestartSlotSysvar = SysvarAccount(sol.LAST_RESTART_SLOT_ID);
 
 /// Instructions Sysvar marker.
 /// Usage: `.instructions = InstructionsSysvar`
-pub const InstructionsSysvar = SysvarAccount(sol.sysvar_id.INSTRUCTIONS);
+pub const InstructionsSysvar = SysvarAccount(sol.INSTRUCTIONS_ID);
 
 // ============================================================================
 // Data Account with Type-Safe Config
@@ -669,7 +678,7 @@ pub fn constraint(comptime expr: []const u8) []const u8 {
 
 /// Has-one constraint shorthand (field == field).
 pub fn hasOne(comptime field: anytype) []const u8 {
-    const name = resolveFieldRef(field);
+    const name = comptime resolveFieldRef(field);
     return name ++ " == " ++ name;
 }
 
@@ -1019,7 +1028,7 @@ pub fn unwrapEventField(comptime T: type) type {
 ///
 /// Useful for IDL generation to determine which fields are indexed.
 pub fn eventFieldConfig(comptime T: type) EventField {
-    if (isEventFieldWrapper(T)) {
+    if (comptime isEventFieldWrapper(T)) {
         return T.FIELD_CONFIG;
     }
     return .{};
@@ -1052,9 +1061,9 @@ test "Signer markers" {
 }
 
 test "Prog marker" {
-    const TestProg = Prog(sol.system_program.ID);
+    const TestProg = Prog(sol.system_program.id);
     try std.testing.expect(TestProg.IS_PROGRAM == true);
-    try std.testing.expect(TestProg.ID.equals(sol.system_program.ID));
+    try std.testing.expect(TestProg.ID.equals(sol.system_program.id));
 }
 
 test "seed helpers" {
@@ -1226,35 +1235,50 @@ test "predefined program markers" {
     try std.testing.expect(TokenProgram.IS_PROGRAM == true);
     try std.testing.expectEqualStrings(
         "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-        &TokenProgram.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk TokenProgram.ID.toBase58(&buf);
+        },
     );
 
     // Token 2022 Program
     try std.testing.expect(Token2022Program.IS_PROGRAM == true);
     try std.testing.expectEqualStrings(
         "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-        &Token2022Program.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk Token2022Program.ID.toBase58(&buf);
+        },
     );
 
     // Associated Token Program
     try std.testing.expect(AssociatedTokenProgram.IS_PROGRAM == true);
     try std.testing.expectEqualStrings(
         "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-        &AssociatedTokenProgram.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk AssociatedTokenProgram.ID.toBase58(&buf);
+        },
     );
 
     // Memo Program
     try std.testing.expect(MemoProgram.IS_PROGRAM == true);
     try std.testing.expectEqualStrings(
         "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
-        &MemoProgram.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk MemoProgram.ID.toBase58(&buf);
+        },
     );
 
     // Stake Program
     try std.testing.expect(StakeProgram.IS_PROGRAM == true);
     try std.testing.expectEqualStrings(
         "Stake11111111111111111111111111111111111111",
-        &StakeProgram.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk StakeProgram.ID.toBase58(&buf);
+        },
     );
 
     // Compute Budget Program
@@ -1267,49 +1291,55 @@ test "predefined sysvar markers" {
     try std.testing.expect(RentSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarRent111111111111111111111111111111111",
-        &RentSysvar.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk RentSysvar.ID.toBase58(&buf);
+        },
     );
 
     // Clock Sysvar
     try std.testing.expect(ClockSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarC1ock11111111111111111111111111111111",
-        &ClockSysvar.ID.toBase58String(),
+        blk: {
+            var buf: [PublicKey.max_base58_len]u8 = undefined;
+            break :blk ClockSysvar.ID.toBase58(&buf);
+        },
     );
 
     // Epoch Schedule Sysvar
     try std.testing.expect(EpochScheduleSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarEpochSchedu1e111111111111111111111111",
-        &EpochScheduleSysvar.ID.toBase58String(),
+        blk: { var buf: [PublicKey.max_base58_len]u8 = undefined; break :blk EpochScheduleSysvar.ID.toBase58(&buf); },
     );
 
     // Slot Hashes Sysvar
     try std.testing.expect(SlotHashesSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarS1otHashes111111111111111111111111111",
-        &SlotHashesSysvar.ID.toBase58String(),
+        blk: { var buf: [PublicKey.max_base58_len]u8 = undefined; break :blk SlotHashesSysvar.ID.toBase58(&buf); },
     );
 
     // Slot History Sysvar
     try std.testing.expect(SlotHistorySysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarS1otHistory11111111111111111111111111",
-        &SlotHistorySysvar.ID.toBase58String(),
+        blk: { var buf: [PublicKey.max_base58_len]u8 = undefined; break :blk SlotHistorySysvar.ID.toBase58(&buf); },
     );
 
     // Epoch Rewards Sysvar
     try std.testing.expect(EpochRewardsSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarEpochRewards1111111111111111111111111",
-        &EpochRewardsSysvar.ID.toBase58String(),
+        blk: { var buf: [PublicKey.max_base58_len]u8 = undefined; break :blk EpochRewardsSysvar.ID.toBase58(&buf); },
     );
 
     // Last Restart Slot Sysvar
     try std.testing.expect(LastRestartSlotSysvar.IS_SYSVAR == true);
     try std.testing.expectEqualStrings(
         "SysvarLastRestartS1ot1111111111111111111111",
-        &LastRestartSlotSysvar.ID.toBase58String(),
+        blk: { var buf: [PublicKey.max_base58_len]u8 = undefined; break :blk LastRestartSlotSysvar.ID.toBase58(&buf); },
     );
 
     // Instructions Sysvar

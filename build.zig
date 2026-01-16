@@ -68,9 +68,9 @@ pub fn build(b: *std.Build) void {
     idl_step.dependOn(&run_idl.step);
 
     const lib_unit_tests = b.addTest(.{
-        .root_module = anchor_mod,
+        .root_module = anchor_host_mod,
     });
-    lib_unit_tests.root_module.addImport("solana_program_sdk", solana_mod);
+    lib_unit_tests.root_module.addImport("solana_program_sdk", solana_host_mod);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 

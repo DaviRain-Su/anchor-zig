@@ -34,119 +34,119 @@ const PublicKey = sol.PublicKey;
 pub const ConstraintExpr = struct {
     expr: []const u8,
 
-    pub fn and_(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn and_(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " && " ++ other.expr ++ ")" };
     }
 
-    pub fn or_(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn or_(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " || " ++ other.expr ++ ")" };
     }
 
-    pub fn not_(self: ConstraintExpr) ConstraintExpr {
+    pub fn not_(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "!(" ++ self.expr ++ ")" };
     }
 
-    pub fn eq(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn eq(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " == " ++ other.expr };
     }
 
-    pub fn ne(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn ne(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " != " ++ other.expr };
     }
 
-    pub fn gt(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn gt(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " > " ++ other.expr };
     }
 
-    pub fn ge(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn ge(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " >= " ++ other.expr };
     }
 
-    pub fn lt(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn lt(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " < " ++ other.expr };
     }
 
-    pub fn le(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn le(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ " <= " ++ other.expr };
     }
 
-    pub fn add(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn add(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " + " ++ other.expr ++ ")" };
     }
 
-    pub fn sub(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn sub(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " - " ++ other.expr ++ ")" };
     }
 
-    pub fn mul(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn mul(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " * " ++ other.expr ++ ")" };
     }
 
-    pub fn div(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn div(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " / " ++ other.expr ++ ")" };
     }
 
-    pub fn mod(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn mod(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "(" ++ self.expr ++ " % " ++ other.expr ++ ")" };
     }
 
-    pub fn len(self: ConstraintExpr) ConstraintExpr {
+    pub fn len(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "len(" ++ self.expr ++ ")" };
     }
 
-    pub fn abs(self: ConstraintExpr) ConstraintExpr {
+    pub fn abs(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "abs(" ++ self.expr ++ ")" };
     }
 
-    pub fn min(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn min(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "min(" ++ self.expr ++ ", " ++ other.expr ++ ")" };
     }
 
-    pub fn max(self: ConstraintExpr, other: ConstraintExpr) ConstraintExpr {
+    pub fn max(comptime self: ConstraintExpr, comptime other: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "max(" ++ self.expr ++ ", " ++ other.expr ++ ")" };
     }
 
-    pub fn clamp(self: ConstraintExpr, min_value: ConstraintExpr, max_value: ConstraintExpr) ConstraintExpr {
+    pub fn clamp(comptime self: ConstraintExpr, comptime min_value: ConstraintExpr, comptime max_value: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "clamp(" ++ self.expr ++ ", " ++ min_value.expr ++ ", " ++ max_value.expr ++ ")" };
     }
 
-    pub fn startsWith(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn startsWith(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "starts_with(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn endsWith(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn endsWith(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "ends_with(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn contains(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn contains(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "contains(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn startsWithCi(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn startsWithCi(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "starts_with_ci(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn endsWithCi(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn endsWithCi(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "ends_with_ci(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn containsCi(self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
+    pub fn containsCi(comptime self: ConstraintExpr, comptime needle: []const u8) ConstraintExpr {
         return .{ .expr = "contains_ci(" ++ self.expr ++ ", " ++ quoteLiteral(needle) ++ ")" };
     }
 
-    pub fn isEmpty(self: ConstraintExpr) ConstraintExpr {
+    pub fn isEmpty(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "is_empty(" ++ self.expr ++ ")" };
     }
 
-    pub fn key(self: ConstraintExpr) ConstraintExpr {
+    pub fn key(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = self.expr ++ ".key()" };
     }
 
-    pub fn asInt(self: ConstraintExpr) ConstraintExpr {
+    pub fn asInt(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "as_int(" ++ self.expr ++ ")" };
     }
 
-    pub fn asBytes(self: ConstraintExpr) ConstraintExpr {
+    pub fn asBytes(comptime self: ConstraintExpr) ConstraintExpr {
         return .{ .expr = "as_bytes(" ++ self.expr ++ ")" };
     }
 };
@@ -214,13 +214,16 @@ fn hexDecode(comptime value: []const u8) []const u8 {
     if (value.len % 2 != 0) {
         @compileError("constraint bytes_hex requires even-length hex string");
     }
-    comptime var out: [value.len / 2]u8 = undefined;
-    comptime var i: usize = 0;
-    while (i < out.len) : (i += 1) {
-        const hi = hexToNibble(value[i * 2]);
-        const lo = hexToNibble(value[i * 2 + 1]);
-        out[i] = (hi << 4) | lo;
-    }
+    const out = comptime blk: {
+        var buf: [value.len / 2]u8 = undefined;
+        var i: usize = 0;
+        while (i < buf.len) : (i += 1) {
+            const hi = hexToNibble(value[i * 2]);
+            const lo = hexToNibble(value[i * 2 + 1]);
+            buf[i] = (hi << 4) | lo;
+        }
+        break :blk buf;
+    };
     return out[0..];
 }
 
@@ -253,8 +256,18 @@ pub const constraint_typed = struct {
                 return pubkeyBytes(value);
             }
         }
-        if (@typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice and @typeInfo(T).pointer.child == u8) {
-            return .{ .expr = "pubkey(" ++ quoteLiteral(value) ++ ")" };
+        if (@typeInfo(T) == .pointer) {
+            const ptr = @typeInfo(T).pointer;
+            if (ptr.size == .slice and ptr.child == u8) {
+                return .{ .expr = "pubkey(" ++ quoteLiteral(value) ++ ")" };
+            }
+            if (ptr.size == .one and @typeInfo(ptr.child) == .array) {
+                const array = @typeInfo(ptr.child).array;
+                if (array.child == u8) {
+                    const slice = value.*[0..array.len];
+                    return .{ .expr = "pubkey(" ++ quoteLiteral(slice) ++ ")" };
+                }
+            }
         }
         @compileError("constraint_typed.pubkey expects PublicKey, [32]u8, or base58 string");
     }
@@ -1056,7 +1069,7 @@ fn valueFromAny(value: anytype) Value {
             return .{ .pubkey = value };
         }
         if (array.child == u8) {
-            @compileError("constraint value type not supported: " ++ @typeName(T));
+            return .{ .bytes = value[0..] };
         }
     }
     if (@typeInfo(T) == .int) {
@@ -1091,9 +1104,23 @@ fn resolveAccessValueAt(
     current: anytype,
     comptime index: usize,
 ) Value {
+    const CurrentType = @TypeOf(current);
+    if (@typeInfo(CurrentType) == .optional) {
+        if (current == null) {
+            return .{ .invalid = {} };
+        }
+        return resolveAccessValueAt(access, current.?, index);
+    }
+    if (@typeInfo(CurrentType) == .pointer) {
+        const ptr_info = @typeInfo(CurrentType).pointer;
+        if (ptr_info.size == .one) {
+            return resolveAccessValueAt(access, current.*, index);
+        }
+    }
+
     if (index >= access.len) {
+        const CleanType = @TypeOf(current);
         if (access.use_key) {
-            const CleanType = @TypeOf(current);
             if (!@hasDecl(CleanType, "key")) {
                 @compileError("constraint key() requires key() method");
             }
@@ -1103,26 +1130,11 @@ fn resolveAccessValueAt(
     }
 
     const name = access.parts[index];
-    var next = current;
-    const CurrentType = @TypeOf(next);
-    if (@typeInfo(CurrentType) == .optional) {
-        if (next == null) {
-            return .{ .invalid = {} };
-        }
-        next = next.?;
-    }
-    if (@typeInfo(@TypeOf(next)) == .pointer) {
-        const ptr_info = @typeInfo(@TypeOf(next)).pointer;
-        if (ptr_info.size == .one) {
-            next = next.*;
-        }
-    }
-
-    const CleanType = @TypeOf(next);
+    const CleanType = @TypeOf(current);
     if (comptime @hasDecl(CleanType, "DataType")) {
         const DataType = CleanType.DataType;
         if (comptime hasField(DataType, name)) {
-            const field_ptr = &@field(next.data.*, name);
+            const field_ptr = &@field(current.data.*, name);
             const field_type = @TypeOf(field_ptr.*);
             if (@typeInfo(field_type) == .array and @typeInfo(field_type).array.child == u8 and @typeInfo(field_type).array.len != 32) {
                 return resolveAccessValueAt(access, field_ptr, index + 1);
@@ -1131,10 +1143,10 @@ fn resolveAccessValueAt(
         }
     }
     if (comptime std.mem.eql(u8, name, "__owner") and @hasDecl(CleanType, "owner")) {
-        return resolveAccessValueAt(access, next.owner(), index + 1);
+        return resolveAccessValueAt(access, current.owner(), index + 1);
     }
     if (comptime hasField(CleanType, name)) {
-        const field_ptr = &@field(next, name);
+        const field_ptr = &@field(current, name);
         const field_type = @TypeOf(field_ptr.*);
         if (@typeInfo(field_type) == .array and @typeInfo(field_type).array.child == u8 and @typeInfo(field_type).array.len != 32) {
             return resolveAccessValueAt(access, field_ptr, index + 1);
@@ -1863,31 +1875,32 @@ test "constraint typed builder emits valid expressions" {
         authority: PublicKey,
     };
 
+    const zero_key = comptime PublicKey.comptimeFromBase58("11111111111111111111111111111111");
     const accounts = Accounts{
         .label = "ctr",
         .count = 2,
-        .authority = PublicKey.comptimeFromBase58("11111111111111111111111111111111"),
+        .authority = zero_key,
     };
 
-    const expr = c.field("label")
+    const expr = comptime c.field("label")
         .startsWith("ct")
         .and_(c.field("count").add(c.int_(1)).eq(c.int_(3)));
 
     try validateConstraintExpr(expr.expr, "label", accounts);
 
-    const key_expr = c.field("authority").eq(c.pubkey("11111111111111111111111111111111"));
+    const key_expr = comptime c.field("authority").eq(c.pubkey("11111111111111111111111111111111"));
     try validateConstraintExpr(key_expr.expr, "authority", accounts);
 
-    const direct_key = c.pubkeyValue(PublicKey.comptimeFromBase58("11111111111111111111111111111111"));
-    const direct_expr = c.field("authority").eq(direct_key);
+    const direct_key = comptime c.pubkeyValue(zero_key);
+    const direct_expr = comptime c.field("authority").eq(direct_key);
     try validateConstraintExpr(direct_expr.expr, "authority", accounts);
 
-    const direct_expr2 = c.field("authority").eq(c.pubkey(PublicKey.comptimeFromBase58("11111111111111111111111111111111")));
+    const direct_expr2 = comptime c.field("authority").eq(c.pubkey(PublicKey.comptimeFromBase58("11111111111111111111111111111111")));
     try validateConstraintExpr(direct_expr2.expr, "authority", accounts);
 
-    const typed_expr = c.field("label").asBytes().len().eq(c.int_(3));
+    const typed_expr = comptime c.field("label").asBytes().len().eq(c.int_(3));
     try validateConstraintExpr(typed_expr.expr, "label", accounts);
 
-    const hex_expr = c.field("label").eq(c.bytesFromHex("637472"));
+    const hex_expr = comptime c.field("label").eq(c.bytesFromHex("637472"));
     try validateConstraintExpr(hex_expr.expr, "label", accounts);
 }
