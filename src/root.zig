@@ -656,8 +656,8 @@ pub fn accountsToInfoSlice(accounts: anytype, out: []sdk.account.Account.Info) [
     }
 
     const count = @min(accounts.len, out.len);
-    for (accounts[0..count], 0..) |account, i| {
-        out[i] = account.info();
+    for (accounts[0..count], 0..) |acct, i| {
+        out[i] = acct.info();
     }
 
     return out[0..count];
