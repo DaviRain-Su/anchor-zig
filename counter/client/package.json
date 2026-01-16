@@ -1,0 +1,16 @@
+{
+  "name": "counter-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.30.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.15.7",
+    "typescript": "^5.4.5"
+  }
+}
