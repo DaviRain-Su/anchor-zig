@@ -641,6 +641,28 @@ pub const loadAccountsWithDependencies = context.loadAccountsWithDependencies;
 /// Context loading errors
 pub const ContextError = context.ContextError;
 
+/// Convert a slice of accounts into a slice of Account.Info using a caller-provided buffer.
+///
+/// Returns the filled slice (min of accounts.len and out.len).
+pub fn accountsToInfoSlice(accounts: anytype, out: []sdk.account.Account.Info) []const sdk.account.Account.Info {
+    const AccountsType = @TypeOf(accounts);
+    const info = @typeInfo(AccountsType);
+    if (info != .slice) {
+        @compileError("accountsToInfoSlice expects a slice");
+    }
+    const Child = info.slice.child;
+    if (!@hasDecl(Child, "info")) {
+        @compileError("accountsToInfoSlice expects elements with info() method");
+    }
+
+    const count = @min(accounts.len, out.len);
+    for (accounts[0..count], 0..) |account, i| {
+        out[i] = account.info();
+    }
+
+    return out[0..count];
+}
+
 // ============================================================================
 // Phase 2: Seeds Module
 // ============================================================================
