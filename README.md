@@ -187,13 +187,14 @@ const Program = struct {
 
 var iface = try anchor.Interface(Program, .{ .program_ids = ProgramIds[0..] }).init(allocator, program_id);
 const ix = try iface.instruction("deposit", accounts, .{ .amount = 1 });
-defer ix.deinit(allocator);
+defer ix.deinit();
 
 const remaining = [_]*const sol.account.Account.Info{ &extra_info };
 const ix_with_remaining = try iface.instructionWithRemaining("deposit", accounts, .{ .amount = 1 }, remaining[0..]);
-defer ix_with_remaining.deinit(allocator);
+defer ix_with_remaining.deinit();
 ```
 
+Instruction builders return an `OwnedInstruction`; call `deinit()` when done to free backing storage.
 Interface CPI accounts accept `AccountMeta`, `AccountInfo`, or types with `toAccountInfo()`.
 Remaining accounts can be provided as `[]AccountMeta` or `[]*const AccountInfo`.
 Use `anchor.AccountMetaOverride` to override signer/writable flags when needed.
