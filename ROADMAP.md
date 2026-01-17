@@ -1,5 +1,22 @@
 # sol-anchor-zig Roadmap
 
+## ✅ v3.2.81 - ATA Mint/Transfer TS End-to-End
+
+- [x] Add TS client that creates mint + ATA
+- [x] Update docs tracking
+
+## ✅ v3.2.80 - ATA Mint/Transfer Example Expansion
+
+- [x] Add local validator + deploy steps to ATA example
+- [x] Add minimal TS client walkthrough
+- [x] Add PDA authority variant for transfers
+
+## ✅ v3.2.79 - Docs Examples + Bootstrap Script
+
+- [x] Add ATA init + mintTo + transferChecked example doc
+- [x] Add bootstrap script for project setup
+- [x] Update docs index and example steps
+
 ## ✅ v3.2.78 - Typed Constraint Overloads + Hex Bytes
 
 - [x] Add pubkey overloads for typed constraints

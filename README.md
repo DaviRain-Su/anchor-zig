@@ -70,6 +70,8 @@ pub fn initialize(ctx: Initialize.Ctx, args: Initialize.Args) !void {
 }
 ```
 
+More details: `docs/README.md`
+
 ## Interface + CPI Helpers
 
 ```zig

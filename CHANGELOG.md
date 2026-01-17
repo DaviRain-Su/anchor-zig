@@ -2,6 +2,82 @@
 
 All notable changes to sol-anchor-zig will be documented in this file.
 
+### Session 2026-01-17-035
+
+**Date**: 2026-01-17
+**Goal**: Add TS end-to-end mint + ATA example
+
+#### Completed Work
+1. Added TS client that creates mint + ATA and invokes program
+2. Updated docs tracking
+
+#### Test Results
+- Not run in this session
+
+### Session 2026-01-17-034
+
+**Date**: 2026-01-17
+**Goal**: Expand ATA mint/transfer example
+
+#### Completed Work
+1. Added validator/deploy steps and TS client walkthrough
+2. Added PDA authority variant for token transfer
+3. Updated docs tracking
+
+#### Test Results
+- Not run in this session
+
+### Session 2026-01-17-033
+
+**Date**: 2026-01-17
+**Goal**: Add token CPI example + bootstrap script docs
+
+#### Completed Work
+1. Added ATA init + mintTo + transferChecked example doc
+2. Added bootstrap project script and updated example steps
+3. Updated docs index and references
+
+#### Test Results
+- Not run in this session
+
+### Session 2026-01-17-032
+
+**Date**: 2026-01-17
+**Goal**: Add PDA + Token CPI example and standardize doc steps
+
+#### Completed Work
+1. Added PDA + Token CPI end-to-end example doc
+2. Added docs index links and example references
+3. Updated Counter example to use standard workflow scripts
+
+#### Test Results
+- Not run in this session
+
+### Session 2026-01-17-031
+
+**Date**: 2026-01-17
+**Goal**: Split DSL docs and add end-to-end example
+
+#### Completed Work
+1. Added docs index and split DSL/CPI/IDL topics
+2. Added end-to-end Counter example guide
+3. Updated DSL usage entry point links
+
+#### Test Results
+- Not run in this session
+
+### Session 2026-01-17-030
+
+**Date**: 2026-01-17
+**Goal**: Expand DSL usage documentation
+
+#### Completed Work
+1. Added comprehensive DSL/framework usage guide
+2. Linked the guide from README
+
+#### Test Results
+- Not run in this session
+
 ### Session 2026-01-15-029
 
 **Date**: 2026-01-15
