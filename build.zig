@@ -2,22 +2,28 @@ const std = @import("std");
 const solana = @import("solana_program_sdk");
 
 pub fn build(b: *std.Build) void {
+    // Accept target and optimize options from dependents
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // SBF target for Solana programs
+    // Use provided target or default to SBF for Solana programs
     const sbf_target = b.resolveTargetQuery(solana.sbf_target);
+    const effective_target = if (target.result.cpu.arch == .x86_64 or target.result.cpu.arch == .aarch64)
+        target
+    else
+        sbf_target;
 
-    // Get dependencies for SBF target
+    // Get dependencies for effective target
     const solana_dep = b.dependency("solana_program_sdk", .{
-        .target = sbf_target,
+        .target = effective_target,
         .optimize = optimize,
     });
     const solana_mod = solana_dep.module("solana_program_sdk");
 
-    // Main anchor module (SBF target for program builds)
+    // Main anchor module
     const anchor_mod = b.addModule("sol_anchor_zig", .{
         .root_source_file = b.path("src/root.zig"),
-        .target = sbf_target,
+        .target = effective_target,
         .optimize = optimize,
     });
     anchor_mod.addImport("solana_program_sdk", solana_mod);
@@ -37,23 +43,8 @@ pub fn build(b: *std.Build) void {
     });
     anchor_host_mod.addImport("solana_program_sdk", solana_host_mod);
 
-    // IDL generation
-    const idl_program_path = b.option([]const u8, "idl-program", "Program module path for IDL generation") orelse "src/idl_example.zig";
-    const idl_output_path = b.option([]const u8, "idl-output", "IDL output path") orelse "idl/anchor.json";
-
-    const idl_options = b.addOptions();
-    idl_options.addOption([]const u8, "idl_output_path", idl_output_path);
-
-    const idl_program_mod = b.createModule(.{
-        .root_source_file = b.path(idl_program_path),
-        .target = b.graph.host,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "solana_program_sdk", .module = solana_host_mod },
-            .{ .name = "sol_anchor_zig", .module = anchor_host_mod },
-        },
-    });
-
+    // IDL CLI tool (template for generating IDL)
+    // Users should create their own IDL generator that imports their program
     const idl_exe = b.addExecutable(.{
         .name = "anchor-idl",
         .root_module = b.createModule(.{
@@ -63,14 +54,12 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "solana_program_sdk", .module = solana_host_mod },
                 .{ .name = "sol_anchor_zig", .module = anchor_host_mod },
-                .{ .name = "idl_program", .module = idl_program_mod },
             },
         }),
     });
-    idl_exe.root_module.addOptions("build_options", idl_options);
 
     const run_idl = b.addRunArtifact(idl_exe);
-    const idl_step = b.step("idl", "Generate Anchor IDL JSON");
+    const idl_step = b.step("idl", "Show IDL generation instructions");
     idl_step.dependOn(&run_idl.step);
 
     // Unit tests (host target)
