@@ -134,26 +134,23 @@ pub fn generateJson(allocator: Allocator, comptime program: anytype) ![]u8 {
     const accounts = try buildAccounts(a, program, &type_registry, &type_defs);
     try root.put(try a.dupe(u8, "accounts"), accounts);
 
-    // Types
+    // Events (optional) - must be before types so event types are registered
+    if (@hasDecl(program, "events")) {
+        const events = try buildEvents(a, program, &type_registry, &type_defs);
+        try root.put(try a.dupe(u8, "events"), events);
+    }
+
+    // Types - added after events so event types are included
     try root.put(try a.dupe(u8, "types"), .{ .array = type_defs });
 
     // Errors
     const errors = try buildErrors(a, program);
     try root.put(try a.dupe(u8, "errors"), errors);
 
-    // Events (optional)
-    if (@hasDecl(program, "events")) {
-        const events = try buildEvents(a, program, &type_registry, &type_defs);
-        try root.put(try a.dupe(u8, "events"), events);
-    }
-
     // Serialize to JSON
     const json = std.json.Value{ .object = root };
-    var out = std.ArrayList(u8).init(allocator);
-    errdefer out.deinit();
-
-    try std.json.stringify(json, .{ .whitespace = .indent_2 }, out.writer());
-    return try out.toOwnedSlice();
+    const formatted = std.json.Stringify.valueAlloc(allocator, json, .{ .whitespace = .indent_2 }) catch return error.OutOfMemory;
+    return formatted;
 }
 
 /// Write IDL JSON to file
@@ -373,13 +370,21 @@ fn buildAccountDef(
     const disc = comptime discriminator_mod.accountDiscriminator(name);
     try obj.put(try a.dupe(u8, "discriminator"), try discriminatorJson(a, disc));
 
-    // Type reference
-    try registerType(a, AccType.DataType, type_registry, type_defs);
-    const type_name = @typeName(AccType.DataType);
-    const short_name = shortTypeName(type_name);
+    // Build inline struct type (for IDL completeness)
     var type_obj = std.json.ObjectMap.init(a);
-    try putString(a, &type_obj, "defined", .{ .name = short_name });
+    try putString(a, &type_obj, "kind", "struct");
+    try type_obj.put(try a.dupe(u8, "fields"), try buildTypeFields(a, AccType.DataType, type_registry, type_defs));
     try obj.put(try a.dupe(u8, "type"), .{ .object = type_obj });
+
+    // Also register as a named type (Anchor client looks up account types by name in `types` array)
+    if (!type_registry.contains(name)) {
+        try type_registry.put(try a.dupe(u8, name), {});
+
+        var type_def = std.json.ObjectMap.init(a);
+        try putString(a, &type_def, "name", name);
+        try type_def.put(try a.dupe(u8, "type"), .{ .object = type_obj });
+        try type_defs.append(.{ .object = type_def });
+    }
 
     return .{ .object = obj };
 }
@@ -423,10 +428,24 @@ fn buildEvents(
             const disc = comptime discriminator_mod.sighash("event", name);
             try obj.put(try a.dupe(u8, "discriminator"), try discriminatorJson(a, disc));
 
-            // Fields
-            try registerType(a, EvtType.DataType, type_registry, type_defs);
+            // Build struct type for event fields
+            var type_obj = std.json.ObjectMap.init(a);
+            try putString(a, &type_obj, "kind", "struct");
             const fields = try buildTypeFields(a, EvtType.DataType, type_registry, type_defs);
+            try type_obj.put(try a.dupe(u8, "fields"), fields);
+            
+            // Add fields to event object
             try obj.put(try a.dupe(u8, "fields"), fields);
+
+            // Register event type in types array (Anchor client expects this)
+            if (!type_registry.contains(name)) {
+                try type_registry.put(try a.dupe(u8, name), {});
+
+                var type_def = std.json.ObjectMap.init(a);
+                try putString(a, &type_def, "name", name);
+                try type_def.put(try a.dupe(u8, "type"), .{ .object = type_obj });
+                try type_defs.append(.{ .object = type_def });
+            }
 
             try arr.append(.{ .object = obj });
         }

@@ -980,8 +980,12 @@ pub fn ProgramContext(comptime Accounts: type) type {
                         return ref.ctx.context.accounts[i].info();
                     }
 
-                    pub fn dataSlice(ref: @This()) []const u8 {
-                        return ref.ctx.context.accounts[i].dataSlice();
+                    pub fn dataSlice(ref: @This()) []u8 {
+                        return ref.ctx.context.accounts[i].data();
+                    }
+                    
+                    pub fn data(ref: @This()) []u8 {
+                        return ref.ctx.context.accounts[i].data();
                     }
 
                     pub fn isSigner(ref: @This()) bool {
