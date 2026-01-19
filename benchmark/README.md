@@ -12,7 +12,8 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 | zig-raw (baseline)  | 5   | 1240 B  | baseline   |
 | **zero-cu-single**  | **5** | 1280 B | **ZERO!** |
 | **zero-cu-multi**   | **7** | 1392 B | **+2 CU** |
-| optimized-minimal   | 31  | 1528 B  | +26 CU     |
+| **fast-single**     | **5** | 1272 B | **ZERO!** |
+| **fast-multi**      | **7** | 1384 B | **+2 CU** |
 
 ### Reference (solana-program-rosetta)
 
@@ -21,61 +22,51 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 | Rust           | 14  |
 | Zig            | 15  |
 
-**Our ZeroCU is 3x faster than rosetta!**
+**anchor-zig is 3x faster than rosetta!**
 
-## API Tiers
+## API Comparison
 
-### 1. ZeroCU (5-7 CU)
+### anchor.fast (Recommended)
 
-Zero runtime overhead with Anchor-style abstractions:
+Anchor-style patterns with ZeroCU performance:
+
+```zig
+const fast = anchor.fast;
+
+const Accounts = struct {
+    authority: fast.Signer,
+    counter: fast.Account(CounterData),
+};
+
+pub fn increment(ctx: fast.Context(Accounts)) !void {
+    ctx.accounts.counter.getMut().count += 1;
+}
+
+// Single (5 CU)
+comptime { fast.exportSingle(Accounts, "increment", increment); }
+
+// Multi (7 CU)
+comptime {
+    fast.exportProgram(Accounts, .{
+        fast.instruction("init", init),
+        fast.instruction("increment", increment),
+    });
+}
+```
+
+### zero_cu (Low-level)
+
+Direct offset calculation with explicit sizes:
 
 ```zig
 const zero = anchor.zero_cu;
 
 const Accounts = struct {
-    target: zero.Readonly(1),  // 1 byte data
+    target: zero.Readonly(1),
 };
 
-pub fn check(ctx: zero.Ctx(Accounts)) !void {
-    if (!ctx.accounts.target.id().equals(ctx.accounts.target.ownerId().*)) {
-        return error.InvalidKey;
-    }
-}
-
-// Single instruction (5 CU)
 comptime { zero.entry(Accounts, "check", Program.check); }
-
-// Multi-instruction (7 CU)
-comptime {
-    zero.multi(Accounts, .{
-        zero.inst("check", Program.check),
-        zero.inst("verify", Program.verify),
-    });
-}
 ```
-
-### 2. Optimized Entry (31+ CU)
-
-Standard Anchor API with tiered validation:
-
-```zig
-pub const Program = struct {
-    pub const instructions = struct {
-        pub const check = anchor.Instruction(.{ .Accounts = MyAccounts });
-    };
-    pub fn check(ctx: anchor.Context(MyAccounts)) !void { ... }
-};
-
-comptime {
-    anchor.optimized.exportEntrypoint(Program, .minimal);
-}
-```
-
-| Level     | Checks                    | CU Overhead |
-|-----------|---------------------------|-------------|
-| full      | All Anchor constraints    | ~150 CU     |
-| minimal   | Discriminator + signer    | ~31 CU      |
-| unchecked | Discriminator only        | ~10 CU      |
 
 ## Running Benchmarks
 
@@ -85,11 +76,11 @@ solana-test-validator
 
 # Build all variants
 cd benchmark/pubkey
-for dir in zig-raw zero-cu-single zero-cu-multi optimized-minimal; do
+for dir in zig-raw zero-cu-single zero-cu-multi fast-single fast-multi; do
     (cd $dir && ../../solana-zig/zig build)
 done
 
-# Deploy and test
+# Run CU tests
 npx tsx test_cu.ts
 ```
 
@@ -99,9 +90,10 @@ npx tsx test_cu.ts
 benchmark/
 ├── pubkey/                    # id == owner comparison
 │   ├── zig-raw/              # Raw Zig baseline
-│   ├── zero-cu-single/       # ZeroCU single instruction
-│   ├── zero-cu-multi/        # ZeroCU multi-instruction
-│   ├── optimized-minimal/    # Standard Anchor (minimal)
+│   ├── zero-cu-single/       # zero_cu single instruction
+│   ├── zero-cu-multi/        # zero_cu multi-instruction
+│   ├── fast-single/          # anchor.fast single
+│   ├── fast-multi/           # anchor.fast multi
 │   └── test_cu.ts            # CU measurement script
 ├── helloworld/               # Hello world logging
 └── transfer-lamports/        # Lamport transfer

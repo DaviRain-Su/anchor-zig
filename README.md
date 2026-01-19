@@ -116,80 +116,84 @@ Notes:
 
 ## Performance APIs (Low CU)
 
-### ZeroCU Framework (5-9 CU)
+### anchor.fast API (5-7 CU) ⭐ Recommended
 
-For maximum performance with zero runtime overhead:
+Anchor-style patterns with ZeroCU performance:
 
 ```zig
 const anchor = @import("sol_anchor_zig");
-const zero = anchor.zero_cu;
+const fast = anchor.fast;
 
-// Define data type
 const CounterData = struct {
     count: u64,
 };
 
-// Define accounts with typed data
-const ProgramAccounts = struct {
-    authority: zero.Signer(0),           // Signer, no data
-    counter: zero.Mut(CounterData),      // Writable, typed data
+const MyAccounts = struct {
+    authority: fast.Signer,              // Transaction signer
+    counter: fast.Account(CounterData),  // Typed account
 };
 
-pub const Program = struct {
-    pub fn increment(ctx: zero.Ctx(ProgramAccounts)) !void {
-        if (!ctx.accounts.authority.isSigner()) {
-            return error.MissingSigner;
-        }
-        ctx.accounts.counter.getMut().count += 1;  // Direct typed access!
+pub fn increment(ctx: fast.Context(MyAccounts)) !void {
+    if (!ctx.accounts.authority.isSigner()) {
+        return error.MissingSigner;
     }
-};
+    ctx.accounts.counter.getMut().count += 1;
+}
 
 // Single instruction (5 CU)
 comptime {
-    zero.entry(ProgramAccounts, "increment", Program.increment);
+    fast.exportSingle(MyAccounts, "increment", increment);
 }
 
-// Multi-instruction (7 CU each)
+// Multi-instruction (7 CU)
 comptime {
-    zero.multi(ProgramAccounts, .{
-        zero.inst("initialize", Program.initialize),
-        zero.inst("increment", Program.increment),
+    fast.exportProgram(MyAccounts, .{
+        fast.instruction("initialize", initialize),
+        fast.instruction("increment", increment),
     });
 }
 ```
 
-### Optimized Entry (31+ CU)
+**Account Types:**
+- `fast.Signer` / `fast.SignerMut` - Transaction signer
+- `fast.Account(T)` / `fast.AccountReadonly(T)` - Typed account
+- `fast.RawAccount(size)` / `fast.RawAccountReadonly(size)` - Raw account
 
-Standard Anchor API with tiered validation:
+### zero_cu API (5-7 CU)
+
+Low-level API with explicit data sizes:
 
 ```zig
-pub const Program = struct {
-    pub const id = sol.PublicKey.comptimeFromBase58("...");
-    pub const instructions = struct {
-        pub const increment = anchor.Instruction(.{ .Accounts = MyAccounts });
-    };
-    pub fn increment(ctx: anchor.Context(MyAccounts)) !void { ... }
+const zero = anchor.zero_cu;
+
+const Accounts = struct {
+    authority: zero.Signer(0),      // Signer, 0 bytes data
+    counter: zero.Mut(CounterData), // Writable, typed data
 };
 
-// Choose validation level
 comptime {
-    anchor.optimized.exportEntrypoint(Program, .minimal);
+    zero.entry(Accounts, "increment", Program.increment);
 }
 ```
 
-| Level     | Checks                    | CU Overhead |
-|-----------|---------------------------|-------------|
-| full      | All Anchor constraints    | ~150 CU     |
-| minimal   | Discriminator + signer    | ~31 CU      |
-| unchecked | Discriminator only        | ~10 CU      |
-
 ### CU Comparison
 
-| API          | CU    | Binary Size | Use Case               |
-|--------------|-------|-------------|------------------------|
-| ZeroCU       | 5-9   | 1.3 KB      | Maximum performance    |
-| Optimized    | 31+   | 1.6 KB      | Anchor compatibility   |
-| Standard     | ~150  | 7+ KB       | Full safety            |
+| API           | CU    | Size    | Use Case               |
+|---------------|-------|---------|------------------------|
+| Raw Zig       | 5     | 1.2 KB  | No framework           |
+| **fast**      | **5-7** | 1.3 KB | **Recommended**        |
+| zero_cu       | 5-7   | 1.3 KB  | Low-level control      |
+| Standard      | ~150  | 7+ KB   | Full Anchor features   |
+
+### Reference (solana-program-rosetta)
+
+| Language | CU |
+|----------|-----|
+| Rust     | 14  |
+| Zig      | 15  |
+| **anchor-zig** | **5** |
+
+**anchor-zig is 3x faster than rosetta!**
 
 ## Build + Test
 
