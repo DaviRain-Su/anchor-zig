@@ -1,8 +1,8 @@
 .{
-    .name = .pubkey_anchor_ultra,
+    .name = .pubkey_abstract,
     .version = "0.1.0",
     .minimum_zig_version = "0.15.0",
-    .fingerprint = 0x8731ccbfd8fa7701,
+    .fingerprint = 0x1e0f39371144be49,
     .dependencies = .{
         .solana_program_sdk = .{
             .path = "../../../../solana-program-sdk-zig",

@@ -999,6 +999,36 @@ pub const producesRefund = realloc.producesRefund;
 pub const ReallocError = realloc.ReallocError;
 
 // ============================================================================
+// Zero-CU Abstraction Layer
+// ============================================================================
+
+/// Zero-overhead abstractions for CU-critical programs
+///
+/// Provides high-level APIs that compile to zero-overhead code using
+/// comptime offset calculations.
+///
+/// Example:
+/// ```zig
+/// const zero = anchor.zero_cu;
+///
+/// const MyAccounts = struct {
+///     source: zero.ZeroSigner(8),
+///     dest: zero.ZeroMut(0),
+/// };
+///
+/// const Ctx = zero.ZeroContext(.{
+///     .accounts = zero.accountDataLengths(MyAccounts),
+/// });
+///
+/// export fn entrypoint(input: [*]u8) u64 {
+///     const ctx = Ctx.load(input);
+///     const source = ctx.account(0);
+///     // Zero overhead access to account data
+/// }
+/// ```
+pub const zero_cu = @import("zero_cu.zig");
+
+// ============================================================================
 // Tests
 // ============================================================================
 

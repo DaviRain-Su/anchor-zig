@@ -149,8 +149,8 @@ Compares account id with owner id (32 bytes comparison).
 | Implementation     | CU Usage | Overhead  | Size     |
 |--------------------|----------|-----------|----------|
 | Raw Zig (baseline) | 5        | -         | 1.2 KB   |
-| **Anchor Zero**    | **5**    | **0 CU**  | 1.3 KB   |
-| Anchor Ultra       | 18       | +13 CU    | 1.3 KB   |
+| **ZeroCU Abstract**| **5**    | **0 CU**  | 1.3 KB   |
+| ZeroCU Manual      | 5        | 0 CU      | 1.3 KB   |
 | Anchor Standard    | 168      | +163 CU   | 7.9 KB   |
 
 ### Reference (solana-program-rosetta)
@@ -160,17 +160,39 @@ Compares account id with owner id (32 bytes comparison).
 | Rust           | 14       |
 | Zig            | 15       |
 
-**🚀 Anchor Zero achieves ZERO CU overhead!**
+**🚀 ZeroCU achieves ZERO overhead with high-level abstractions!**
 - Our Zig: 5 CU (beats rosetta's 15 CU by 3x!)
-- Anchor Zero: 5 CU (Anchor-compatible with zero overhead!)
+- ZeroCU Abstract: 5 CU (readable code, zero overhead!)
 
-### Optimization Levels
+### ZeroCU Abstraction Example
 
-| Variant         | Description                                      | Overhead |
-|-----------------|--------------------------------------------------|----------|
-| Anchor Zero     | Fixed-offset access, comptime discriminator      | 0 CU     |
-| Anchor Ultra    | Dynamic account skip, comptime discriminator     | +13 CU   |
-| Anchor Standard | Full framework with validation                   | +163 CU  |
+```zig
+const anchor = @import("sol_anchor_zig");
+const zero = anchor.zero_cu;
+
+// Define accounts with their data sizes
+const CheckAccounts = struct {
+    target: zero.ZeroReadonly(1),  // 1 byte account data
+};
+
+// Create zero-overhead context type
+const Ctx = zero.ZeroContext(.{
+    .accounts = zero.accountDataLengths(CheckAccounts),
+});
+
+fn check(ctx: Ctx) u64 {
+    const target = ctx.account(0);
+    
+    // High-level API - compiles to direct pointer access
+    if (target.id().equals(target.ownerId().*)) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+```
+
+All offsets are computed at **comptime**, resulting in zero runtime overhead!
 
 ### Note on OptimizeMode
 
