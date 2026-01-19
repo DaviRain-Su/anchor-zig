@@ -101,6 +101,46 @@ pub fn EventDef(comptime name: []const u8, comptime Data: type) type {
     };
 }
 
+/// Constant definition for IDL
+/// Supports primitive types: u8-u64, i8-i64, bool, []const u8 (string), [N]u8 (bytes), PublicKey
+pub fn ConstantDef(comptime name: []const u8, comptime T: type, comptime value: T) type {
+    return struct {
+        pub const constant_name = name;
+        pub const ValueType = T;
+        pub const constant_value = value;
+    };
+}
+
+/// Constant definition with string value (for strings)
+pub fn ConstantString(comptime name: []const u8, comptime value: []const u8) type {
+    return struct {
+        pub const constant_name = name;
+        pub const ValueType = []const u8;
+        pub const constant_value = value;
+        pub const is_string = true;
+    };
+}
+
+/// Constant definition for bytes
+pub fn ConstantBytes(comptime name: []const u8, comptime len: usize, comptime value: [len]u8) type {
+    return struct {
+        pub const constant_name = name;
+        pub const ValueType = [len]u8;
+        pub const constant_value = value;
+        pub const is_bytes = true;
+    };
+}
+
+/// Constant definition for PublicKey
+pub fn ConstantPubkey(comptime name: []const u8, comptime value: PublicKey) type {
+    return struct {
+        pub const constant_name = name;
+        pub const ValueType = PublicKey;
+        pub const constant_value = value;
+        pub const is_pubkey = true;
+    };
+}
+
 // ============================================================================
 // IDL Generation
 // ============================================================================
@@ -146,6 +186,12 @@ pub fn generateJson(allocator: Allocator, comptime program: anytype) ![]u8 {
     // Errors
     const errors = try buildErrors(a, program);
     try root.put(try a.dupe(u8, "errors"), errors);
+    
+    // Constants (optional)
+    if (@hasDecl(program, "constants")) {
+        const constants = try buildConstants(a, program);
+        try root.put(try a.dupe(u8, "constants"), constants);
+    }
 
     // Serialize to JSON
     const json = std.json.Value{ .object = root };
@@ -407,6 +453,101 @@ fn buildErrors(a: Allocator, comptime program: anytype) !std.json.Value {
     }
 
     return .{ .array = arr };
+}
+
+fn buildConstants(a: Allocator, comptime program: anytype) !std.json.Value {
+    var arr = std.json.Array.init(a);
+
+    if (@hasDecl(program, "constants")) {
+        const constants = program.constants;
+        inline for (constants) |ConstType| {
+            var obj = std.json.ObjectMap.init(a);
+            const name = ConstType.constant_name;
+            try putString(a, &obj, "name", name);
+            
+            // Determine type and value
+            const T = ConstType.ValueType;
+            const value = ConstType.constant_value;
+            
+            // Type string
+            const type_str = comptime typeToString(T);
+            try putString(a, &obj, "type", type_str);
+            
+            // Value - format depends on type
+            if (@hasDecl(ConstType, "is_string")) {
+                // String constant
+                try putString(a, &obj, "value", value);
+            } else if (@hasDecl(ConstType, "is_bytes")) {
+                // Bytes constant - encode as array of numbers
+                var bytes_arr = std.json.Array.init(a);
+                for (value) |b| {
+                    try bytes_arr.append(.{ .integer = @intCast(b) });
+                }
+                try obj.put(try a.dupe(u8, "value"), .{ .array = bytes_arr });
+            } else if (@hasDecl(ConstType, "is_pubkey")) {
+                // PublicKey constant - encode as base58 string
+                var buf: [44]u8 = undefined;
+                const pubkey_str = value.toBase58(&buf);
+                try putString(a, &obj, "value", pubkey_str);
+            } else if (T == bool) {
+                // Boolean constant
+                try obj.put(try a.dupe(u8, "value"), .{ .bool = value });
+            } else if (@typeInfo(T) == .int) {
+                // Integer constant
+                try obj.put(try a.dupe(u8, "value"), .{ .integer = @intCast(value) });
+            } else {
+                // Fallback: try to format as integer
+                if (comptime std.meta.trait.isSignedInt(T) or std.meta.trait.isUnsignedInt(T)) {
+                    try obj.put(try a.dupe(u8, "value"), .{ .integer = @intCast(value) });
+                }
+            }
+            
+            try arr.append(.{ .object = obj });
+        }
+    }
+
+    return .{ .array = arr };
+}
+
+/// Convert type to IDL type string (for constants)
+fn typeToString(comptime T: type) []const u8 {
+    return switch (@typeInfo(T)) {
+        .int => |info| blk: {
+            const prefix = if (info.signedness == .signed) "i" else "u";
+            break :blk prefix ++ switch (info.bits) {
+                8 => "8",
+                16 => "16",
+                32 => "32",
+                64 => "64",
+                128 => "128",
+                else => "64",
+            };
+        },
+        .bool => "bool",
+        .pointer => |ptr| blk: {
+            if (ptr.size == .slice and ptr.child == u8) {
+                break :blk "string";
+            }
+            break :blk "bytes";
+        },
+        .array => |arr| blk: {
+            if (arr.child == u8) {
+                if (arr.len == 32) {
+                    break :blk "pubkey"; // Likely a PublicKey
+                }
+                break :blk "bytes";
+            }
+            break :blk "bytes";
+        },
+        .@"struct" => blk: {
+            // Check if it's a PublicKey
+            if (@hasField(T, "bytes") and @sizeOf(T) == 32) {
+                break :blk "pubkey";
+            }
+            break :blk "bytes";
+        },
+        else => "bytes",
+    };
 }
 
 fn buildEvents(

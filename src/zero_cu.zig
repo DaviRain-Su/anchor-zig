@@ -153,6 +153,18 @@ pub const AccountConstraints = struct {
     mint_authority: ?[]const u8 = null,
     /// Mint account decimals constraint
     mint_decimals: ?u8 = null,
+    
+    /// Custom constraint validator type
+    /// Must be a type with a `check` function: fn(ctx: anytype, acc: anytype) Error!void
+    /// Example:
+    /// ```zig
+    /// .constraint = struct {
+    ///     pub fn check(ctx: anytype, acc: anytype) !void {
+    ///         if (acc.get().amount < 100) return error.InsufficientFunds;
+    ///     }
+    /// },
+    /// ```
+    constraint: ?type = null,
 };
 
 // ============================================================================
@@ -924,6 +936,15 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
                     if (data.len < 45) return error.AccountDataTooSmall;
                     const decimals = data[44];
                     if (decimals != expected_decimals) return error.ConstraintMintDecimals;
+                }
+                
+                // Custom constraint
+                if (C.constraint) |ConstraintType| {
+                    if (@hasDecl(ConstraintType, "check")) {
+                        try ConstraintType.check(self, acc);
+                    } else {
+                        @compileError("constraint type must have a 'check' function");
+                    }
                 }
             }
         }
@@ -1781,6 +1802,17 @@ pub fn ProgramContext(comptime Accounts: type) type {
                         if (data.len < 45) return error.AccountDataTooSmall;
                         const decimals = data[44];
                         if (decimals != expected_decimals) return error.ConstraintMintDecimals;
+                    }
+                    
+                    // Custom constraint
+                    if (C.constraint) |ConstraintType| {
+                        if (@hasDecl(ConstraintType, "check")) {
+                            // Create account ref for the constraint checker
+                            const acc_ref = @field(accs, field.name);
+                            try ConstraintType.check(self, acc_ref);
+                        } else {
+                            @compileError("constraint type must have a 'check' function");
+                        }
                     }
                 }
                 _ = @field(accs, field.name);

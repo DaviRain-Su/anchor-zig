@@ -45,7 +45,7 @@
 | `#[account(init, payer = <acc>, space = N)]` | `.init = true, .payer = "acc"` | ✅ | `processInit()` |
 | `#[account(close = <acc>)]` | `.close = "acc"` | ✅ | `processClose()` |
 | `#[account(realloc = N, ...)]` | `.realloc = N, .realloc_payer = "acc"` | ✅ | `processRealloc()` |
-| `#[account(constraint = <expr>)]` | ❌ | ❌ | 自定义约束表达式 |
+| `#[account(constraint = <expr>)]` | `.constraint = ValidatorType` | ✅ | 自定义约束表达式 |
 | `#[account(rent_exempt = ...)]` | `.rent_exempt = true/false` | ✅ | `validate()` |
 | `#[account(executable)]` | `.executable = true` | ✅ | `validate()` |
 | `#[account(zero)]` | `.zero = true` | ✅ | `validate()` |
@@ -115,7 +115,7 @@
 | types | ✅ | ✅ |
 | events | ✅ | ✅ |
 | errors | ✅ | ⚠️ 手动定义 |
-| constants | ❌ | ❌ |
+| constants | `idl.ConstantDef()` | ✅ |
 | docs | ⚠️ 部分 | ⚠️ 部分 |
 
 ---
@@ -151,7 +151,7 @@
 | Context bumps | ✅ | ✅ `ctx.deriveBumps()` / `ctx.getBump("name")` |
 | Remaining accounts | ✅ | ✅ `ctx.remainingAccounts()` |
 | Account close refund | ✅ | ✅ |
-| Zero-copy | AccountLoader | ❌ |
+| Zero-copy | `zero.AccountLoader(T, .{})` | ✅ |
 | Access control | ✅ | 手动实现 |
 
 ---
@@ -160,9 +160,6 @@
 
 ### 账户类型 (低优先级)
 - **Interface/InterfaceAccount** - Token-2022 等多程序兼容
-
-### 约束系统 (可选)
-- **constraint** - 自定义表达式约束 (用户可手动实现)
 
 
 
