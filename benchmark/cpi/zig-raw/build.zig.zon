@@ -6,7 +6,7 @@
     .dependencies = .{
         .solana_program_sdk = .{
             .url = "https://github.com/DaviRain-Su/solana-program-sdk-zig/archive/refs/heads/dev.tar.gz",
-            .hash = "solana_program_sdk-0.17.1-wGj9UPb2EQA8jnPRwvIZKkn7GLrtuuiEyr4rskmTpk73",
+            .hash = "solana_program_sdk-0.17.1-wGj9UN34EQDy1-vRrElsqiPcW7U_YNZd37v-Al2nuTa8",
         },
     },
     .paths = .{
