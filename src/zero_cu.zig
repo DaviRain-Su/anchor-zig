@@ -56,35 +56,69 @@ pub const ACCOUNT_DATA_PADDING: usize = 10 * 1024;
 pub const ACCOUNT_HEADER_SIZE: usize = Account.DATA_HEADER;
 
 // ============================================================================
-// Account Type Markers
+// Account Type Markers (with optional typed data)
 // ============================================================================
 
-/// Signer account marker with data size
-/// The account must be a transaction signer and is writable.
-pub fn Signer(comptime data_len: usize) type {
+/// Signer account - must be transaction signer, writable
+/// 
+/// Usage:
+/// - `Signer(0)` - Signer with no data
+/// - `Signer(CounterData)` - Signer with typed data access
+pub fn Signer(comptime DataOrLen: anytype) type {
+    const info = resolveDataType(DataOrLen);
     return struct {
-        pub const data_size = data_len;
+        pub const data_size = info.size;
+        pub const DataType = info.Type;
         pub const is_signer = true;
         pub const is_writable = true;
+        pub const has_typed_data = info.has_type;
     };
 }
 
-/// Mutable (writable) account marker with data size
-pub fn Mut(comptime data_len: usize) type {
+/// Mutable (writable) account
+///
+/// Usage:
+/// - `Mut(0)` - Writable with no data
+/// - `Mut(CounterData)` - Writable with typed data access
+pub fn Mut(comptime DataOrLen: anytype) type {
+    const info = resolveDataType(DataOrLen);
     return struct {
-        pub const data_size = data_len;
+        pub const data_size = info.size;
+        pub const DataType = info.Type;
         pub const is_signer = false;
         pub const is_writable = true;
+        pub const has_typed_data = info.has_type;
     };
 }
 
-/// Readonly account marker with data size
-pub fn Readonly(comptime data_len: usize) type {
+/// Readonly account
+///
+/// Usage:
+/// - `Readonly(0)` - Readonly with no data
+/// - `Readonly(ConfigData)` - Readonly with typed data access
+pub fn Readonly(comptime DataOrLen: anytype) type {
+    const info = resolveDataType(DataOrLen);
     return struct {
-        pub const data_size = data_len;
+        pub const data_size = info.size;
+        pub const DataType = info.Type;
         pub const is_signer = false;
         pub const is_writable = false;
+        pub const has_typed_data = info.has_type;
     };
+}
+
+/// Resolve data type or length
+fn resolveDataType(comptime DataOrLen: anytype) struct { size: usize, Type: type, has_type: bool } {
+    const T = @TypeOf(DataOrLen);
+    if (T == type) {
+        // It's a type - use its size
+        return .{ .size = @sizeOf(DataOrLen), .Type = DataOrLen, .has_type = true };
+    } else if (T == comptime_int) {
+        // It's a number - use as raw size
+        return .{ .size = DataOrLen, .Type = void, .has_type = false };
+    } else {
+        @compileError("Expected type or comptime_int for account data");
+    }
 }
 
 // Aliases for compatibility
@@ -128,6 +162,15 @@ pub fn accountDataLengths(comptime Accounts: type) []const usize {
 
 /// Zero-overhead account accessor with comptime-calculated offsets
 pub fn ZeroAccount(comptime index: usize, comptime preceding_data_lens: []const usize) type {
+    return ZeroAccountTyped(index, preceding_data_lens, void);
+}
+
+/// Zero-overhead account accessor with typed data
+pub fn ZeroAccountTyped(
+    comptime index: usize,
+    comptime preceding_data_lens: []const usize,
+    comptime DataType: type,
+) type {
     // Calculate base offset to this account
     const base_offset = comptime blk: {
         var off: usize = 8; // num_accounts
@@ -143,15 +186,6 @@ pub fn ZeroAccount(comptime index: usize, comptime preceding_data_lens: []const 
         const Self = @This();
 
         // Offsets within Account.Data (88 byte header)
-        // [0]: duplicate_index (1 byte)
-        // [1]: is_signer (1 byte)
-        // [2]: is_writable (1 byte)
-        // [3]: is_executable (1 byte)
-        // [4-7]: original_data_len (4 bytes)
-        // [8-39]: id (32 bytes)
-        // [40-71]: owner_id (32 bytes)
-        // [72-79]: lamports (8 bytes)
-        // [80-87]: data_len (8 bytes)
         const ID_OFFSET = base_offset + 8;
         const OWNER_OFFSET = base_offset + 8 + 32;
         const LAMPORTS_OFFSET = base_offset + 8 + 32 + 32;
@@ -189,12 +223,29 @@ pub fn ZeroAccount(comptime index: usize, comptime preceding_data_lens: []const 
             return self.input[base_offset + 3] != 0;
         }
 
-        /// Get account data as const pointer
+        /// Get typed data (readonly) - only available if DataType is not void
+        pub inline fn get(self: Self) if (DataType != void) *const DataType else noreturn {
+            if (DataType == void) {
+                @compileError("Account has no typed data. Use data() for raw access.");
+            }
+            return @ptrCast(@alignCast(self.input + DATA_OFFSET));
+        }
+
+        /// Get typed data (mutable) - only available if DataType is not void
+        pub inline fn getMut(self: Self) if (DataType != void) *DataType else noreturn {
+            if (DataType == void) {
+                @compileError("Account has no typed data. Use dataMut() for raw access.");
+            }
+            const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
+            return @ptrCast(@alignCast(ptr + DATA_OFFSET));
+        }
+
+        /// Get account data as const pointer (raw)
         pub inline fn data(self: Self, comptime len: usize) *const [len]u8 {
             return @ptrCast(self.input + DATA_OFFSET);
         }
 
-        /// Get account data as mutable pointer
+        /// Get account data as mutable pointer (raw)
         pub inline fn dataMut(self: Self, comptime len: usize) *[len]u8 {
             const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
             return @ptrCast(ptr + DATA_OFFSET);
@@ -228,7 +279,12 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
     const AccountsAccessor = blk: {
         var acc_fields: [fields.len]std.builtin.Type.StructField = undefined;
         inline for (fields, 0..) |field, i| {
-            const AccType = ZeroAccount(i, data_lens);
+            // Check if account type has typed data
+            const AccType = if (@hasDecl(field.type, "has_typed_data") and field.type.has_typed_data)
+                ZeroAccountTyped(i, data_lens, field.type.DataType)
+            else
+                ZeroAccount(i, data_lens);
+
             acc_fields[i] = .{
                 .name = field.name,
                 .type = AccType,

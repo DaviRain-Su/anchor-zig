@@ -1,17 +1,26 @@
-//! ZeroCU Single Instruction Example
+//! ZeroCU Single Instruction Example - Typed API
 //!
-//! Demonstrates the clean zero_cu API for single-instruction programs.
-//! Result: 5 CU (same as raw Zig, 3x faster than rosetta's 15 CU)
+//! Demonstrates zero_cu with typed account data.
+//! Result: 5 CU (same as raw Zig)
 
 const anchor = @import("sol_anchor_zig");
 const zero = anchor.zero_cu;
 
 // ============================================================================
-// Account Definition
+// Account Data Type
+// ============================================================================
+
+/// Simple 1-byte marker data
+const MarkerData = struct {
+    value: u8,
+};
+
+// ============================================================================
+// Account Definition - Typed!
 // ============================================================================
 
 const CheckAccounts = struct {
-    target: zero.Readonly(1), // Account with 1 byte data
+    target: zero.Readonly(MarkerData), // Typed as MarkerData
 };
 
 // ============================================================================
@@ -27,6 +36,10 @@ pub const Program = struct {
     pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
         const target = ctx.accounts.target;
 
+        // Can access typed data if needed
+        _ = target.get().value;
+
+        // Original comparison
         if (!target.id().equals(target.ownerId().*)) {
             return error.InvalidKey;
         }
