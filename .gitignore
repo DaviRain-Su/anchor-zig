@@ -1,5 +1,14 @@
-.zig-cache
-zig-out
-node_modules
-solana-zig
-target
+# Zig build artifacts
+.zig-cache/
+zig-out/
+
+# Node.js
+node_modules/
+
+# Solana
+solana-zig/
+target/
+
+# Temporary files
+/tmp/
+*.log
