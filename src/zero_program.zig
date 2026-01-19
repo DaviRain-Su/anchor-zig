@@ -349,13 +349,16 @@ fn multiInstructionEntrypoint(comptime instructions: anytype) fn ([*]u8) callcon
 /// Generate multi-instruction entrypoint with shared account layout
 /// 
 /// All instructions must use the same Accounts type.
+/// Discriminators must be precomputed as u64 to avoid code bloat.
 /// 
 /// Usage:
 /// ```zig
+/// const disc = anchor.instructionDiscriminator;
+/// 
 /// comptime {
 ///     zero.exportMultiInstruction(ProgramAccounts, .{
-///         .{ "check", Program.check },
-///         .{ "verify", Program.verify },
+///         .{ @as(u64, @bitCast(disc("check"))), Program.check },
+///         .{ @as(u64, @bitCast(disc("verify"))), Program.verify },
 ///     });
 /// }
 /// ```
@@ -371,9 +374,8 @@ pub fn exportMultiInstruction(
             const ctx = Ctx.load(input);
 
             inline for (handlers) |h| {
-                const name: []const u8 = h.@"0";
+                const expected: u64 = h.@"0";
                 const handler = h.@"1";
-                const expected: u64 = @bitCast(discriminator_mod.instructionDiscriminator(name));
                 if (disc.* == expected) {
                     if (handler(ctx)) |_| return 0 else |_| return 1;
                 }
@@ -384,6 +386,11 @@ pub fn exportMultiInstruction(
     };
 
     @export(&S.entry, .{ .name = "entrypoint" });
+}
+
+/// Helper to create instruction entry with precomputed discriminator
+pub fn instruction(comptime name: []const u8, comptime handler: anytype) struct { u64, @TypeOf(handler) } {
+    return .{ @as(u64, @bitCast(discriminator_mod.instructionDiscriminator(name))), handler };
 }
 
 /// Export entrypoint from a Program struct definition
