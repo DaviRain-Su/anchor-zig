@@ -217,6 +217,44 @@ pub const DispatchConfig = program_entry.DispatchConfig;
 pub const FallbackContext = program_entry.FallbackContext;
 
 // ============================================================================
+// Optimized Entry Point
+// ============================================================================
+
+/// Optimized entry point with tiered validation
+///
+/// Combines standard Anchor API with ZeroCU performance optimizations.
+///
+/// ## Validation Levels
+///
+/// | Level     | Checks                    | Overhead |
+/// |-----------|---------------------------|----------|
+/// | full      | All constraints           | ~150 CU  |
+/// | minimal   | Discriminator + signer    | ~50 CU   |
+/// | unchecked | Discriminator only        | ~10 CU   |
+///
+/// ## Example
+///
+/// ```zig
+/// // Standard Anchor definitions...
+///
+/// pub const Program = struct {
+///     pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
+///     pub const instructions = struct {
+///         pub const increment = anchor.Instruction(.{ .Accounts = MyAccounts });
+///     };
+///     pub fn increment(ctx: anchor.Context(MyAccounts)) !void { ... }
+/// };
+///
+/// comptime {
+///     anchor.optimized.exportEntrypoint(Program, .minimal);
+/// }
+/// ```
+pub const optimized = @import("optimized.zig");
+
+/// Validation level for optimized entry
+pub const ValidationLevel = optimized.ValidationLevel;
+
+// ============================================================================
 // Interface + CPI Helpers
 // ============================================================================
 
