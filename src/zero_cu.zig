@@ -256,6 +256,60 @@ pub fn ZeroAccountTyped(
             const len_ptr: *const u64 = @ptrCast(@alignCast(self.input + DATA_LEN_OFFSET));
             return (self.input + DATA_OFFSET)[0..len_ptr.*];
         }
+
+        // ================================================================
+        // Validation Helpers (manual call for zero overhead)
+        // ================================================================
+
+        /// Verify account is owned by expected program
+        pub inline fn verifyOwner(self: Self, expected: PublicKey) !void {
+            if (!self.ownerId().equals(expected)) {
+                return error.ConstraintOwner;
+            }
+        }
+
+        /// Verify account address matches expected
+        pub inline fn verifyAddress(self: Self, expected: PublicKey) !void {
+            if (!self.id().equals(expected)) {
+                return error.ConstraintAddress;
+            }
+        }
+
+        /// Verify account is a signer
+        pub inline fn verifySigner(self: Self) !void {
+            if (!self.isSigner()) {
+                return error.ConstraintSigner;
+            }
+        }
+
+        /// Verify account is writable
+        pub inline fn verifyWritable(self: Self) !void {
+            if (!self.isWritable()) {
+                return error.ConstraintMut;
+            }
+        }
+
+        /// Verify account is executable (for program accounts)
+        pub inline fn verifyExecutable(self: Self) !void {
+            if (!self.isExecutable()) {
+                return error.ConstraintExecutable;
+            }
+        }
+
+        /// Verify account data length
+        pub inline fn verifyDataLen(self: Self, expected: usize) !void {
+            const len_ptr: *const u64 = @ptrCast(@alignCast(self.input + DATA_LEN_OFFSET));
+            if (len_ptr.* != expected) {
+                return error.ConstraintSpace;
+            }
+        }
+
+        /// Verify account has minimum lamports
+        pub inline fn verifyMinLamports(self: Self, min: u64) !void {
+            if (self.lamports().* < min) {
+                return error.InsufficientFunds;
+            }
+        }
     };
 }
 
@@ -338,6 +392,42 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
         /// Get raw instruction data pointer (includes discriminator)
         pub inline fn rawData(self: Self) [*]const u8 {
             return self.input + ix_data_offset;
+        }
+
+        /// Get program ID (at end of input buffer)
+        /// Note: Requires scanning past instruction data
+        pub inline fn programId(self: Self) *const PublicKey {
+            const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + ix_data_offset - 8));
+            const data_len = data_len_ptr.*;
+            return @ptrCast(@alignCast(self.input + ix_data_offset + data_len));
+        }
+
+        // ================================================================
+        // Batch Validation Helpers
+        // ================================================================
+
+        /// Verify all signers in one call
+        pub inline fn verifySigners(self: Self) !void {
+            inline for (fields) |field| {
+                if (field.type.is_signer) {
+                    const acc = @field(self.accounts, field.name);
+                    if (!acc.isSigner()) {
+                        return error.ConstraintSigner;
+                    }
+                }
+            }
+        }
+
+        /// Verify all writable accounts
+        pub inline fn verifyWritable(self: Self) !void {
+            inline for (fields) |field| {
+                if (field.type.is_writable) {
+                    const acc = @field(self.accounts, field.name);
+                    if (!acc.isWritable()) {
+                        return error.ConstraintMut;
+                    }
+                }
+            }
         }
     };
 }
