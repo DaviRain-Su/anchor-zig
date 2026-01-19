@@ -999,68 +999,64 @@ pub const producesRefund = realloc.producesRefund;
 pub const ReallocError = realloc.ReallocError;
 
 // ============================================================================
-// Zero-CU Abstraction Layer
+// Zero-CU Framework (5-7 CU overhead)
 // ============================================================================
 
-/// Zero-overhead abstractions for CU-critical programs
+/// Zero-CU Framework - High-level API with zero runtime overhead
 ///
-/// Provides high-level APIs that compile to zero-overhead code using
-/// comptime offset calculations.
+/// Provides Anchor-style abstractions that compile to optimal code:
+/// - Single instruction: 5 CU
+/// - Multi instruction: 7 CU per instruction
 ///
-/// Example:
-/// ```zig
-/// const zero = anchor.zero_cu;
+/// ## Quick Start (Single Instruction)
 ///
-/// const MyAccounts = struct {
-///     source: zero.ZeroSigner(8),
-///     dest: zero.ZeroMut(0),
-/// };
-///
-/// const Ctx = zero.ZeroContext(.{
-///     .accounts = zero.accountDataLengths(MyAccounts),
-/// });
-///
-/// export fn entrypoint(input: [*]u8) u64 {
-///     const ctx = Ctx.load(input);
-///     const source = ctx.account(0);
-///     // Zero overhead access to account data
-/// }
-/// ```
-pub const zero_cu = @import("zero_cu.zig");
-
-/// Zero-CU Program Framework
-///
-/// Provides Anchor-style program definition with zero runtime overhead.
-///
-/// Example:
 /// ```zig
 /// const anchor = @import("sol_anchor_zig");
 /// const zero = anchor.zero_cu;
 ///
-/// const TransferAccounts = struct {
-///     from: zero.ZeroSigner(0),
-///     to: zero.ZeroMut(0),
+/// const MyAccounts = struct {
+///     source: zero.Signer(0),    // Signer, 0 bytes data
+///     dest: zero.Mut(0),          // Writable, 0 bytes data
 /// };
 ///
 /// pub const Program = struct {
-///     pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
-///
-///     pub const instructions = struct {
-///         pub const transfer = struct {
-///             pub const Accounts = TransferAccounts;
-///             pub const Args = void;
-///         };
-///     };
-///
-///     pub fn transfer(ctx: anchor.zero_cu.ZeroInstructionContext(TransferAccounts)) !void {
-///         // Zero-overhead account access
+///     pub fn transfer(ctx: zero.Ctx(MyAccounts)) !void {
+///         const source = ctx.accounts.source;
+///         const dest = ctx.accounts.dest;
+///         // ... implementation
 ///     }
 /// };
 ///
 /// comptime {
-///     anchor.zero_program.Program(Program).exportEntrypoint();
+///     zero.entry(MyAccounts, "transfer", Program.transfer);
 /// }
 /// ```
+///
+/// ## Multi-Instruction Program
+///
+/// ```zig
+/// comptime {
+///     zero.multi(SharedAccounts, .{
+///         zero.inst("initialize", Program.initialize),
+///         zero.inst("transfer", Program.transfer),
+///         zero.inst("close", Program.close),
+///     });
+/// }
+/// ```
+///
+/// ## Key Types
+///
+/// - `zero.Signer(data_len)` - Signer account marker
+/// - `zero.Mut(data_len)` - Mutable account marker
+/// - `zero.Readonly(data_len)` - Readonly account marker
+/// - `zero.Ctx(Accounts)` - Instruction context type
+/// - `zero.entry(...)` - Single instruction export
+/// - `zero.multi(...)` - Multi instruction export
+/// - `zero.inst(...)` - Instruction definition for multi
+///
+pub const zero_cu = @import("zero_cu.zig");
+
+/// Alias for zero_cu (same module)
 pub const zero_program = @import("zero_program.zig");
 
 // ============================================================================

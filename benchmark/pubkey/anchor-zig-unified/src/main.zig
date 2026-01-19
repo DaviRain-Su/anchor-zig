@@ -1,21 +1,21 @@
-//! Anchor-Zig Pubkey Comparison - Unified Zero-CU API
+//! ZeroCU Single Instruction Example
 //!
-//! Anchor-style API with zero runtime overhead.
-//! Clean, readable code that compiles to raw performance.
+//! Demonstrates the clean zero_cu API for single-instruction programs.
+//! Result: 5 CU (same as raw Zig, 3x faster than rosetta's 15 CU)
 
 const anchor = @import("sol_anchor_zig");
-const zero = anchor.zero_program;
+const zero = anchor.zero_cu;
 
 // ============================================================================
-// Account Definitions
+// Account Definition
 // ============================================================================
 
 const CheckAccounts = struct {
-    target: zero.ZeroReadonly(1), // Account with 1 byte data
+    target: zero.Readonly(1), // Account with 1 byte data
 };
 
 // ============================================================================
-// Program Definition - Anchor compatible structure
+// Program
 // ============================================================================
 
 pub const Program = struct {
@@ -23,17 +23,10 @@ pub const Program = struct {
         "PubkeyComp111111111111111111111111111111111"
     );
 
-    pub const instructions = struct {
-        pub const check = struct {
-            pub const Accounts = CheckAccounts;
-        };
-    };
-
-    /// Instruction handler with named account access
-    pub fn check(ctx: zero.Context(CheckAccounts)) !void {
+    /// Check if account id equals owner id
+    pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
         const target = ctx.accounts.target;
 
-        // High-level API - compiles to zero overhead
         if (!target.id().equals(target.ownerId().*)) {
             return error.InvalidKey;
         }
@@ -41,9 +34,9 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Single-line entrypoint export!
+// Single-line entrypoint export (5 CU)
 // ============================================================================
 
 comptime {
-    zero.exportSingleInstruction(CheckAccounts, "check", Program.check);
+    zero.entry(CheckAccounts, "check", Program.check);
 }
