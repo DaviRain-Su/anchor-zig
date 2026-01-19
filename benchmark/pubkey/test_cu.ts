@@ -149,6 +149,7 @@ async function main() {
     { name: "zero-cu-single", path: "zero-cu-single/zig-out/lib/zero_cu_single.so", disc: "check" },
     { name: "zero-cu-multi", path: "zero-cu-multi/zig-out/lib/zero_cu_multi.so", disc: "check" },
     { name: "zero-cu-validated", path: "zero-cu-validated/zig-out/lib/zero_cu_validated.so", disc: "check" },
+    { name: "zero-cu-program", path: "zero-cu-program/zig-out/lib/zero_cu_program.so", disc: "check" },
   ];
 
   console.log("║ Deploying and testing programs...                          ║");
@@ -213,7 +214,7 @@ async function main() {
   console.log("\n📝 Reference (solana-program-rosetta):");
   console.log("   • Rust: 14 CU");
   console.log("   • Zig:  15 CU");
-  console.log("\n🎯 anchor-zig is 3x faster than rosetta!");
+  console.log("\n🎯 anchor-zig zero-cu is 3x faster than rosetta!");
 }
 
 main().catch(console.error);

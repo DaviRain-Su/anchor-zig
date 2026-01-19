@@ -755,26 +755,56 @@ pub fn ixValidated(
 pub fn program(comptime handlers: anytype) void {
     const S = struct {
         fn entrypoint(input: [*]u8) callconv(.c) u64 {
-            // Read discriminator at a fixed offset
-            // We need to find the instruction data first
-            // For programs with varying account layouts, we scan for discriminator
+            // Read number of accounts from input (first u64)
+            const num_accounts: *const u64 = @ptrCast(@alignCast(input));
             
-            // Try each handler's account layout to find matching discriminator
+            // Find matching handler based on number of accounts
+            inline for (handlers) |H| {
+                const expected_accounts = std.meta.fields(H.AccountsType).len;
+                
+                // Only check discriminator if account count matches
+                if (num_accounts.* == expected_accounts) {
+                    const CtxType = ZeroInstructionContext(H.AccountsType);
+                    const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
+                    
+                    if (disc_ptr.* == H.discriminator) {
+                        const ctx = CtxType.load(input);
+                        
+                        if (H.auto_validate) {
+                            ctx.validate() catch return 1;
+                        }
+                        
+                        if (H.handlerFn(ctx)) |_| {
+                            return 0;
+                        } else |_| {
+                            return 1;
+                        }
+                    }
+                }
+            }
+            
+            // If no exact match found, try all handlers (for different data sizes)
+            // This handles cases where same account count but different discriminators
             inline for (handlers) |H| {
                 const CtxType = ZeroInstructionContext(H.AccountsType);
-                const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
+                const expected_accounts = std.meta.fields(H.AccountsType).len;
                 
-                if (disc_ptr.* == H.discriminator) {
-                    const ctx = CtxType.load(input);
+                // Safety check: only read discriminator if we have enough accounts
+                if (num_accounts.* >= expected_accounts) {
+                    const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
                     
-                    if (H.auto_validate) {
-                        ctx.validate() catch return 1;
-                    }
-                    
-                    if (H.handlerFn(ctx)) |_| {
-                        return 0;
-                    } else |_| {
-                        return 1;
+                    if (disc_ptr.* == H.discriminator) {
+                        const ctx = CtxType.load(input);
+                        
+                        if (H.auto_validate) {
+                            ctx.validate() catch return 1;
+                        }
+                        
+                        if (H.handlerFn(ctx)) |_| {
+                            return 0;
+                        } else |_| {
+                            return 1;
+                        }
                     }
                 }
             }
