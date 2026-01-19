@@ -2,7 +2,7 @@
 //!
 //! A simple counter program demonstrating:
 //! - zero_cu account definitions with constraints
-//! - Multi-instruction program (5-7 CU overhead)
+//! - Multi-instruction program with different account layouts
 //! - IDL generation for TypeScript client
 //!
 //! ## Build
@@ -14,7 +14,7 @@
 //! ## Generate IDL
 //! ```bash
 //! cd counter
-//! ../benchmark/solana-zig/zig build idl
+//! ./gen_idl.sh
 //! # Output: target/idl/counter.json
 //! ```
 
@@ -34,7 +34,7 @@ pub const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("4ZfDpKj91bdUw8FuJBGvZu3
 // Account Data Structures
 // ============================================================================
 
-/// Counter account data
+/// Counter account data (8 bytes)
 pub const CounterData = struct {
     /// Current count value
     count: u64,
@@ -48,20 +48,32 @@ pub const CounterData = struct {
 pub const InitializeAccounts = struct {
     /// Payer for account creation (must be signer, writable)
     payer: zero.Signer(0),
-    /// Counter account to initialize
+    /// Counter account to initialize (writable, will hold CounterData)
     counter: zero.Mut(CounterData),
-    /// System program
-    system_program: zero.Program(sol.system_program.id),
+    /// System program for account creation
+    system_program: zero.Readonly(0),
 };
 
 /// Accounts for increment instruction
 pub const IncrementAccounts = struct {
-    /// Authority who can increment
+    /// Authority who can increment (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to modify
+    /// Counter account to modify (writable, validated owner)
     counter: zero.Account(CounterData, .{
         .owner = PROGRAM_ID,
     }),
+};
+
+/// Accounts for close instruction
+pub const CloseAccounts = struct {
+    /// Authority who can close (must be signer)
+    authority: zero.Signer(0),
+    /// Counter account to close
+    counter: zero.Account(CounterData, .{
+        .owner = PROGRAM_ID,
+    }),
+    /// Destination for remaining lamports
+    destination: zero.Mut(0),
 };
 
 // ============================================================================
@@ -96,6 +108,8 @@ pub const Program = struct {
             "Initialize a new counter account with an initial value"),
         idl.InstructionWithDocs("increment", IncrementAccounts, IncrementArgs, 
             "Increment the counter by the specified amount"),
+        idl.InstructionWithDocs("close", CloseAccounts, void, 
+            "Close the counter account and return rent to destination"),
     };
 
     /// Account definitions for IDL
@@ -107,6 +121,7 @@ pub const Program = struct {
     /// Custom errors
     pub const errors = enum(u32) {
         CounterOverflow = 6000,
+        Unauthorized = 6001,
     };
 
     /// Events
@@ -115,6 +130,10 @@ pub const Program = struct {
             authority: sol.PublicKey,
             amount: u64,
             new_count: u64,
+        }),
+        idl.EventDef("CounterClosed", struct {
+            authority: sol.PublicKey,
+            final_count: u64,
         }),
     };
 };
@@ -127,7 +146,7 @@ pub const Program = struct {
 pub fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
     const args = ctx.args(InitializeArgs);
     
-    // Write discriminator
+    // Write discriminator (first 8 bytes)
     zero.writeDiscriminator(ctx.accounts.counter, "Counter");
 
     // Initialize data
@@ -148,19 +167,21 @@ pub fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
     data.count = new_count[0];
 }
 
+/// Close the counter account
+pub fn close(ctx: zero.Ctx(CloseAccounts)) !void {
+    try zero.closeAccount(ctx.accounts.counter, ctx.accounts.destination);
+}
+
 // ============================================================================
 // Program Entry Point
 // ============================================================================
 
-// Note: When using different account layouts for different instructions,
-// we need a unified approach. For simplicity, we'll use increment accounts
-// as the base and handle initialize separately through discriminator dispatch.
-
-// For this example, we use a single entry point with IncrementAccounts
-// In production, consider using a union type for accounts or multiple programs.
+// Use zero.program() for multi-instruction programs with different account layouts
 comptime {
-    zero.multi(IncrementAccounts, .{
-        zero.inst("increment", increment),
+    zero.program(.{
+        zero.ix("initialize", InitializeAccounts, initialize),
+        zero.ix("increment", IncrementAccounts, increment),
+        zero.ix("close", CloseAccounts, close),
     });
 }
 
@@ -168,7 +189,7 @@ comptime {
 // IDL Generation
 // ============================================================================
 
-/// Generate IDL JSON (called by build.zig idl step)
+/// Generate IDL JSON (called by gen_idl.zig)
 pub fn generateIdl(allocator: std.mem.Allocator) ![]u8 {
     return idl.generateJson(allocator, Program);
 }

@@ -686,6 +686,107 @@ pub fn multi(
 pub const exportMultiInstruction = multi;
 
 // ============================================================================
+// Program with Multiple Account Layouts
+// ============================================================================
+
+/// Define an instruction with its own account layout for use with program()
+/// 
+/// Use this when different instructions have different account structures.
+/// Each instruction can have a unique set of accounts.
+/// 
+/// Usage:
+/// ```zig
+/// comptime {
+///     zero.program(.{
+///         zero.ix("initialize", InitAccounts, initialize),
+///         zero.ix("increment", IncrementAccounts, increment),
+///         zero.ix("close", CloseAccounts, close),
+///     });
+/// }
+/// ```
+///
+/// Note: When using different account layouts, the binary size increases
+/// because each layout requires its own offset calculation code.
+/// For maximum performance (5 CU), use entry() or multi() with a single
+/// account layout.
+pub fn ix(
+    comptime name: []const u8,
+    comptime Accounts: type,
+    comptime func: anytype,
+) type {
+    return struct {
+        pub const instruction_name = name;
+        pub const AccountsType = Accounts;
+        pub const handlerFn = func;
+        pub const discriminator: u64 = @bitCast(discriminator_mod.instructionDiscriminator(name));
+        pub const auto_validate = false;
+    };
+}
+
+/// Define an instruction with auto-validation
+pub fn ixValidated(
+    comptime name: []const u8,
+    comptime Accounts: type,
+    comptime func: anytype,
+) type {
+    return struct {
+        pub const instruction_name = name;
+        pub const AccountsType = Accounts;
+        pub const handlerFn = func;
+        pub const discriminator: u64 = @bitCast(discriminator_mod.instructionDiscriminator(name));
+        pub const auto_validate = true;
+    };
+}
+
+/// Export program with multiple instructions, each with its own account layout
+///
+/// This is the most flexible entry point, supporting different account
+/// structures for each instruction.
+///
+/// Usage:
+/// ```zig
+/// comptime {
+///     zero.program(.{
+///         zero.handler("initialize", InitAccounts, initialize),
+///         zero.handler("increment", IncrementAccounts, increment),
+///     });
+/// }
+/// ```
+pub fn program(comptime handlers: anytype) void {
+    const S = struct {
+        fn entrypoint(input: [*]u8) callconv(.c) u64 {
+            // Read discriminator at a fixed offset
+            // We need to find the instruction data first
+            // For programs with varying account layouts, we scan for discriminator
+            
+            // Try each handler's account layout to find matching discriminator
+            inline for (handlers) |H| {
+                const CtxType = ZeroInstructionContext(H.AccountsType);
+                const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
+                
+                if (disc_ptr.* == H.discriminator) {
+                    const ctx = CtxType.load(input);
+                    
+                    if (H.auto_validate) {
+                        ctx.validate() catch return 1;
+                    }
+                    
+                    if (H.handlerFn(ctx)) |_| {
+                        return 0;
+                    } else |_| {
+                        return 1;
+                    }
+                }
+            }
+            
+            return 1; // No matching instruction
+        }
+    };
+
+    @export(&S.entrypoint, .{ .name = "entrypoint" });
+}
+
+// ============================================================================
 // Legacy Compatibility
 // ============================================================================
 
