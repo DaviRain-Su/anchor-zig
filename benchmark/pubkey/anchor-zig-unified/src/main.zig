@@ -1,20 +1,21 @@
 //! Anchor-Zig Pubkey Comparison - Unified Zero-CU API
 //!
-//! Uses Anchor-style API with zero runtime overhead.
+//! Anchor-style API with zero runtime overhead.
+//! Clean, readable code that compiles to raw performance.
 
 const anchor = @import("sol_anchor_zig");
-const zero = anchor.zero_cu;
+const zero = anchor.zero_program;
 
 // ============================================================================
-// Account Definitions - Anchor style
+// Account Definitions
 // ============================================================================
 
 const CheckAccounts = struct {
-    target: zero.ZeroReadonly(1),
+    target: zero.ZeroReadonly(1), // Account with 1 byte data
 };
 
 // ============================================================================
-// Program Definition
+// Program Definition - Anchor compatible structure
 // ============================================================================
 
 pub const Program = struct {
@@ -28,8 +29,11 @@ pub const Program = struct {
         };
     };
 
-    pub fn check(ctx: zero.ZeroInstructionContext(CheckAccounts)) !void {
+    /// Instruction handler with named account access
+    pub fn check(ctx: zero.Context(CheckAccounts)) !void {
         const target = ctx.accounts.target;
+
+        // High-level API - compiles to zero overhead
         if (!target.id().equals(target.ownerId().*)) {
             return error.InvalidKey;
         }
@@ -37,24 +41,9 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Entrypoint with Zero-CU dispatch
+// Single-line entrypoint export!
 // ============================================================================
 
-const CHECK_DISC: u64 = @bitCast(anchor.instructionDiscriminator("check"));
-const Ctx = zero.ZeroInstructionContext(CheckAccounts);
-
-export fn entrypoint(input: [*]u8) u64 {
-    // Check discriminator at comptime-known offset
-    const disc: *align(1) const u64 = @ptrCast(input + Ctx.ix_data_offset);
-    if (disc.* != CHECK_DISC) {
-        return 1;
-    }
-
-    // Dispatch to handler
-    const ctx = Ctx.load(input);
-    if (Program.check(ctx)) |_| {
-        return 0;
-    } else |_| {
-        return 1;
-    }
+comptime {
+    zero.exportSingleInstruction(CheckAccounts, "check", Program.check);
 }

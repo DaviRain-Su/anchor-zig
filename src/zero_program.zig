@@ -121,17 +121,48 @@ pub fn ZeroProgram(comptime config: anytype) type {
     };
 }
 
-/// Simpler API: Define program with struct-based instructions
+/// Zero-CU Program wrapper
+/// 
+/// Generates entrypoint with zero-overhead dispatch.
+/// All instruction matching and account access computed at comptime.
+///
+/// Usage:
+/// ```zig
+/// const anchor = @import("sol_anchor_zig");
+/// const zero = anchor.zero_program;
+///
+/// const TransferAccounts = struct {
+///     from: zero.ZeroSigner(0),
+///     to: zero.ZeroMut(0),
+/// };
+///
+/// pub const MyProgram = struct {
+///     pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
+///
+///     pub const instructions = struct {
+///         pub const transfer = struct {
+///             pub const Accounts = TransferAccounts;
+///         };
+///     };
+///
+///     pub fn transfer(ctx: zero.Context(TransferAccounts)) !void {
+///         // Handler implementation
+///     }
+/// };
+///
+/// // Single line export!
+/// comptime { zero.exportProgram(MyProgram); }
+/// ```
 pub fn Program(comptime ProgramDef: type) type {
-    const program_id = ProgramDef.id;
-
     return struct {
-        pub const id = program_id;
+        pub const id = ProgramDef.id;
 
+        /// Context type for instruction handlers
         pub fn Context(comptime Accounts: type) type {
             return ZeroInstructionContext(Accounts);
         }
 
+        /// Export the entrypoint (call from comptime block)
         pub fn exportEntrypoint() void {
             @export(&entrypoint, .{ .name = "entrypoint" });
         }
@@ -141,10 +172,6 @@ pub fn Program(comptime ProgramDef: type) type {
         }
 
         fn dispatch(input: [*]u8) u64 {
-            return dispatchInner(input);
-        }
-
-        fn dispatchInner(input: [*]u8) u64 {
             const InstructionsType = ProgramDef.instructions;
             const decls = @typeInfo(InstructionsType).@"struct".decls;
 
@@ -154,38 +181,95 @@ pub fn Program(comptime ProgramDef: type) type {
                 }
             }
 
-            return 1;
+            return 1; // No matching instruction
         }
 
         fn tryDispatch(comptime name: []const u8, input: [*]u8) ?u64 {
             const InstructionsType = ProgramDef.instructions;
             const InstType = @field(InstructionsType, name);
 
+            // Skip non-instruction decls
             if (!@hasDecl(InstType, "Accounts")) {
                 return null;
             }
 
             const Accounts = InstType.Accounts;
             const CtxType = ZeroInstructionContext(Accounts);
-            const ix_offset = CtxType.ix_data_offset;
 
+            // Check discriminator at comptime-known offset
             const expected_disc = discriminator_mod.instructionDiscriminator(name);
             const expected_u64: u64 = @bitCast(expected_disc);
+            const actual: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
 
-            const actual: *align(1) const u64 = @ptrCast(input + ix_offset);
             if (actual.* != expected_u64) {
                 return null;
             }
 
+            // Load context and call handler
             const ctx = CtxType.load(input);
             const handler = @field(ProgramDef, name);
-            const result = handler(ctx);
 
-            if (result) |_| {
+            if (handler(ctx)) |_| {
                 return 0;
             } else |_| {
                 return 1;
             }
         }
     };
+}
+
+/// Context type alias for cleaner handler signatures
+pub fn Context(comptime Accounts: type) type {
+    return ZeroInstructionContext(Accounts);
+}
+
+/// Generate entrypoint function for a single-instruction program
+/// 
+/// For programs with only one instruction, this generates the minimal
+/// entrypoint code inline.
+///
+/// Usage:
+/// ```zig
+/// comptime {
+///     @export(&zero.singleInstructionEntrypoint(
+///         CheckAccounts,
+///         "check", 
+///         Program.check
+///     ), .{ .name = "entrypoint" });
+/// }
+/// ```
+pub fn singleInstructionEntrypoint(
+    comptime Accounts: type,
+    comptime inst_name: []const u8,
+    comptime handler: anytype,
+) fn ([*]u8) callconv(.c) u64 {
+    const Ctx = ZeroInstructionContext(Accounts);
+    const disc: u64 = @bitCast(discriminator_mod.instructionDiscriminator(inst_name));
+
+    return struct {
+        fn entry(input: [*]u8) callconv(.c) u64 {
+            const actual: *align(1) const u64 = @ptrCast(input + Ctx.ix_data_offset);
+            if (actual.* != disc) return 1;
+
+            const ctx = Ctx.load(input);
+            if (handler(ctx)) |_| return 0 else |_| return 1;
+        }
+    }.entry;
+}
+
+/// Macro-like helper to generate and export entrypoint
+/// 
+/// Usage for single instruction:
+/// ```zig
+/// comptime {
+///     zero.exportSingleInstruction(CheckAccounts, "check", Program.check);
+/// }
+/// ```
+pub fn exportSingleInstruction(
+    comptime Accounts: type,
+    comptime inst_name: []const u8,
+    comptime handler: anytype,
+) void {
+    const entry_fn = singleInstructionEntrypoint(Accounts, inst_name, handler);
+    @export(&entry_fn, .{ .name = "entrypoint" });
 }

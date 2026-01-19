@@ -164,35 +164,44 @@ Compares account id with owner id (32 bytes comparison).
 - Our Zig: 5 CU (beats rosetta's 15 CU by 3x!)
 - ZeroCU Abstract: 5 CU (readable code, zero overhead!)
 
-### ZeroCU Abstraction Example
+### ZeroCU Unified API Example
 
 ```zig
 const anchor = @import("sol_anchor_zig");
-const zero = anchor.zero_cu;
+const zero = anchor.zero_program;
 
-// Define accounts with their data sizes
+// Account definitions with data sizes
 const CheckAccounts = struct {
     target: zero.ZeroReadonly(1),  // 1 byte account data
 };
 
-// Create zero-overhead context type
-const Ctx = zero.ZeroContext(.{
-    .accounts = zero.accountDataLengths(CheckAccounts),
-});
+// Anchor-compatible program structure
+pub const Program = struct {
+    pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
 
-fn check(ctx: Ctx) u64 {
-    const target = ctx.account(0);
-    
-    // High-level API - compiles to direct pointer access
-    if (target.id().equals(target.ownerId().*)) {
-        return 0;
-    } else {
-        return 1;
+    pub const instructions = struct {
+        pub const check = struct {
+            pub const Accounts = CheckAccounts;
+        };
+    };
+
+    // Handler with named account access
+    pub fn check(ctx: zero.Context(CheckAccounts)) !void {
+        const target = ctx.accounts.target;  // Named access!
+        
+        if (!target.id().equals(target.ownerId().*)) {
+            return error.InvalidKey;
+        }
     }
+};
+
+// Single-line entrypoint export!
+comptime {
+    zero.exportSingleInstruction(CheckAccounts, "check", Program.check);
 }
 ```
 
-All offsets are computed at **comptime**, resulting in zero runtime overhead!
+All offsets computed at **comptime** → zero runtime overhead!
 
 ### Note on OptimizeMode
 
