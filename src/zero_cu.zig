@@ -503,6 +503,20 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
             return .{ .input = input, .accounts = acc };
         }
 
+        /// Load from parsed Context (for manual dispatch scenarios like SPL Token)
+        pub inline fn loadFromContext(
+            program_id: *align(1) const PublicKey,
+            context_accounts: []sol.account.Account,
+            ix_data: []const u8,
+        ) Self {
+            _ = program_id;
+            _ = context_accounts;
+            _ = ix_data;
+            // For static context, we still need the raw input pointer
+            // This is a compatibility shim - real implementation would need input
+            @compileError("loadFromContext not supported for static ZeroInstructionContext. Use Context.load() based approach.");
+        }
+
         pub inline fn args(self: Self, comptime T: type) *const T {
             return @ptrCast(@alignCast(self.input + ix_data_offset + 8));
         }
