@@ -38,5 +38,5 @@ pub fn main() !void {
     try idl.writeJsonFile(allocator, Program, output_path);
 
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("Generated IDL: {s}\n", .{output_path});
+    try stdout.print("✅ Generated IDL: {s}\n", .{output_path});
 }

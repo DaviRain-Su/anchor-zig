@@ -1,12 +1,9 @@
 .{
-    .name = .counter_zero_cu,
+    .name = .@"anchor-zig-idl",
     .version = "0.1.0",
     .minimum_zig_version = "0.15.0",
-    .fingerprint = 0xea2e12732e21a5f1,
+    .fingerprint = 0xf1a2b3c4d5e6f708,
     .dependencies = .{
-        .solana_program_sdk = .{
-            .path = "../../../solana-program-sdk-zig",
-        },
         .sol_anchor_zig = .{
             .path = "../..",
         },
@@ -14,6 +11,6 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
+        "main.zig",
     },
 }

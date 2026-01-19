@@ -1,23 +1,17 @@
 //! anchor-zig IDL Generator CLI
 //!
-//! Generates Anchor-compatible IDL JSON from Zig program definitions.
+//! Command-line tool for generating Anchor-compatible IDL JSON files.
 //!
-//! ## Usage
+//! ## Standalone Usage
 //!
-//! ```bash
-//! # Build the generator
-//! zig build
+//! This tool shows usage instructions. For actual IDL generation,
+//! create a project-specific generator (see --help).
 //!
-//! # Generate IDL (program module must be imported at compile time)
-//! ./zig-out/bin/gen-idl -o target/idl/program.json
-//! ```
+//! ## Library Usage
 //!
-//! ## Integration
-//!
-//! Create a project-specific generator that imports your program:
+//! Import this module in your project's gen_idl.zig:
 //!
 //! ```zig
-//! // src/gen_idl.zig
 //! const gen = @import("anchor-zig-gen-idl");
 //! const Program = @import("main.zig").Program;
 //!
@@ -27,7 +21,6 @@
 //! ```
 
 const std = @import("std");
-const builtin = @import("builtin");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -37,165 +30,157 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    var output_path: ?[]const u8 = null;
     var show_help = false;
     var show_version = false;
 
-    var i: usize = 1;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-        if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output")) {
-            i += 1;
-            if (i < args.len) {
-                output_path = args[i];
-            } else {
-                try printError("Missing argument for --output");
-                return;
-            }
-        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             show_help = true;
         } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
             show_version = true;
         }
     }
 
+    const stdout = std.io.getStdOut().writer();
+
     if (show_version) {
-        try printVersion();
+        try stdout.print("anchor-zig-idl 0.1.0\n", .{});
         return;
     }
 
     if (show_help) {
-        try printHelp();
+        try printHelp(stdout);
         return;
     }
 
-    // Show usage instructions
-    try printUsageInstructions(output_path);
+    // Default: show quick start guide
+    try printQuickStart(stdout);
 }
 
-fn printVersion() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print("anchor-zig-idl 0.1.0\n", .{});
-}
-
-fn printHelp() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print(
+fn printHelp(w: anytype) !void {
+    try w.print(
         \\anchor-zig IDL Generator
+        \\========================
         \\
-        \\Generates Anchor-compatible IDL JSON from Zig program definitions.
+        \\Generate Anchor-compatible IDL JSON from Zig program definitions.
         \\
         \\USAGE:
-        \\    gen-idl [OPTIONS]
+        \\    anchor-zig-idl [OPTIONS]
         \\
         \\OPTIONS:
-        \\    -o, --output <PATH>    Output file path (default: target/idl/program.json)
-        \\    -h, --help             Show this help message
-        \\    -v, --version          Show version information
+        \\    -h, --help       Show this help message
+        \\    -v, --version    Show version information
         \\
-        \\INTEGRATION:
+        \\QUICK START:
         \\
-        \\    This is a template tool. To generate IDL for your program, create a
-        \\    project-specific generator:
+        \\1. Define your program with IDL metadata in main.zig:
         \\
-        \\    1. Create gen_idl.zig in your project:
+        \\    const anchor = @import("sol_anchor_zig");
+        \\    const zero = anchor.zero_cu;
+        \\    const idl = anchor.idl_zero;
         \\
-        \\       const std = @import("std");
-        \\       const anchor = @import("sol_anchor_zig");
-        \\       const idl = anchor.idl_zero;
-        \\       const Program = @import("main.zig").Program;
+        \\    pub const Program = struct {{
+        \\        pub const id = PROGRAM_ID;
+        \\        pub const name = "my_program";
+        \\        pub const version = "0.1.0";
         \\
-        \\       pub fn main() !void {{
-        \\           var gpa = std.heap.GeneralPurposeAllocator(.{{}}){{}}; 
-        \\           defer _ = gpa.deinit();
-        \\           try idl.writeJsonFile(gpa.allocator(), Program, "target/idl/program.json");
-        \\           std.debug.print("Generated IDL\\n", .{{}});
-        \\       }}
+        \\        pub const instructions = .{{
+        \\            idl.Instruction("initialize", InitAccounts, InitArgs),
+        \\            idl.Instruction("process", ProcessAccounts, void),
+        \\        }};
         \\
-        \\    2. Add to build.zig:
+        \\        pub const accounts = .{{
+        \\            idl.AccountDef("MyAccount", MyAccountData),
+        \\        }};
         \\
-        \\       const idl_exe = b.addExecutable(.{{
-        \\           .name = "gen-idl",
-        \\           .root_source_file = b.path("src/gen_idl.zig"),
-        \\           .target = b.host,
-        \\       }});
-        \\       // Add imports...
-        \\       
-        \\       const idl_step = b.step("idl", "Generate IDL");
-        \\       idl_step.dependOn(&b.addRunArtifact(idl_exe).step);
+        \\        pub const errors = enum(u32) {{
+        \\            InvalidInput = 6000,
+        \\        }};
+        \\    }};
         \\
-        \\    3. Run: zig build idl
+        \\2. Create gen_idl.zig in your project:
         \\
-        \\EXAMPLES:
+        \\    const std = @import("std");
+        \\    const anchor = @import("sol_anchor_zig");
+        \\    const idl = anchor.idl_zero;
+        \\    const Program = @import("main.zig").Program;
         \\
-        \\    # Generate IDL to default path
-        \\    zig build idl
+        \\    pub fn main() !void {{
+        \\        var gpa = std.heap.GeneralPurposeAllocator(.{{}}){{}}; 
+        \\        defer _ = gpa.deinit();
+        \\        try idl.writeJsonFile(gpa.allocator(), Program, "target/idl/program.json");
+        \\        std.debug.print("Generated IDL\\n", .{{}});
+        \\    }}
         \\
-        \\    # Generate IDL to custom path
-        \\    ./zig-out/bin/gen-idl -o ./my-idl.json
+        \\3. Build and run:
+        \\
+        \\    zig build-exe src/gen_idl.zig \\
+        \\        --deps solana_program_sdk,sol_anchor_zig \\
+        \\        -Msolana_program_sdk=path/to/sdk/src/root.zig \\
+        \\        -Msol_anchor_zig=path/to/anchor-zig/src/root.zig
+        \\    
+        \\    ./gen_idl
+        \\
+        \\TYPESCRIPT USAGE:
+        \\
+        \\    import {{ Program }} from "@coral-xyz/anchor";
+        \\    import idl from "./target/idl/program.json";
+        \\
+        \\    const program = new Program(idl, programId, provider);
+        \\    await program.methods.initialize().accounts({{ ... }}).rpc();
         \\
     , .{});
 }
 
-fn printUsageInstructions(output_path: ?[]const u8) !void {
-    const stdout = std.io.getStdOut().writer();
-
-    try stdout.print(
+fn printQuickStart(w: anytype) !void {
+    try w.print(
         \\
         \\anchor-zig IDL Generator
         \\========================
         \\
         \\This tool helps generate Anchor-compatible IDL JSON files.
         \\
-        \\Output path: {s}
+        \\Run with --help for detailed usage instructions.
         \\
-        \\To generate IDL for your program, you need to create a project-specific
-        \\generator that imports your program module. See --help for details.
+        \\QUICK START:
         \\
-        \\Quick Start:
+        \\1. In your program (main.zig), define Program struct with IDL metadata
+        \\2. Create gen_idl.zig that imports Program and calls idl.writeJsonFile()
+        \\3. Build and run gen_idl to generate target/idl/program.json
+        \\4. Use the IDL with @coral-xyz/anchor TypeScript client
         \\
-        \\  1. Define your program with IDL metadata:
+        \\Example gen_idl.zig:
         \\
-        \\     const idl = @import("sol_anchor_zig").idl_zero;
+        \\    const std = @import("std");
+        \\    const idl = @import("sol_anchor_zig").idl_zero;
+        \\    const Program = @import("main.zig").Program;
         \\
-        \\     pub const Program = struct {{
-        \\         pub const id = PROGRAM_ID;
-        \\         pub const name = "my_program";
-        \\         pub const version = "0.1.0";
+        \\    pub fn main() !void {{
+        \\        var gpa = std.heap.GeneralPurposeAllocator(.{{}}){{}}; 
+        \\        defer _ = gpa.deinit();
+        \\        try idl.writeJsonFile(gpa.allocator(), Program, "target/idl/program.json");
+        \\    }}
         \\
-        \\         pub const instructions = .{{
-        \\             idl.Instruction("initialize", InitAccounts, InitArgs),
-        \\             idl.Instruction("process", ProcessAccounts, void),
-        \\         }};
-        \\
-        \\         pub const accounts = .{{
-        \\             idl.AccountDef("MyAccount", MyAccountData),
-        \\         }};
-        \\
-        \\         pub const errors = enum(u32) {{
-        \\             InvalidInput = 6000,
-        \\         }};
-        \\     }};
-        \\
-        \\  2. Create gen_idl.zig and add build step (see --help)
-        \\
-        \\  3. Run: zig build idl
-        \\
-    , .{output_path orelse "target/idl/program.json"});
-}
-
-fn printError(msg: []const u8) !void {
-    const stderr = std.io.getStdErr().writer();
-    try stderr.print("Error: {s}\n", .{msg});
+    , .{});
 }
 
 // ============================================================================
-// Library Functions (for use in project-specific generators)
+// Library API for project-specific generators
 // ============================================================================
 
-/// Run IDL generation with command line argument parsing
+/// Run IDL generation with command line argument parsing.
+/// 
+/// Usage in your gen_idl.zig:
+/// ```zig
+/// const gen = @import("anchor-zig-gen-idl");
+/// const Program = @import("main.zig").Program;
+/// 
+/// pub fn main() !void {
+///     try gen.run(Program);
+/// }
+/// ```
 pub fn run(comptime Program: type) !void {
-    const idl_zero = @import("idl_zero.zig");
+    const idl_zero = @import("sol_anchor_zig").idl_zero;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -219,12 +204,12 @@ pub fn run(comptime Program: type) !void {
     try idl_zero.writeJsonFile(allocator, Program, output_path);
 
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("Generated IDL: {s}\n", .{output_path});
+    try stdout.print("✅ Generated IDL: {s}\n", .{output_path});
 }
 
-/// Generate IDL to stdout
+/// Generate IDL and print to stdout.
 pub fn generateToStdout(comptime Program: type) !void {
-    const idl_zero = @import("idl_zero.zig");
+    const idl_zero = @import("sol_anchor_zig").idl_zero;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
