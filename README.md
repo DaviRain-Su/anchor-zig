@@ -4,46 +4,91 @@ High-performance Anchor-like framework for Solana program development in Zig.
 
 ## ⚡ Performance
 
-| Implementation | CU Overhead | Binary Size |
-|----------------|-------------|-------------|
-| **zero_cu** | **5-7 CU** | ~1.3 KB |
-| Standard Anchor | ~150 CU | ~7+ KB |
-| Anchor Rust | ~150 CU | ~100+ KB |
+| API | CU Overhead | Binary Size | Use Case |
+|-----|-------------|-------------|----------|
+| `entry()` | 5 CU | ~1.3 KB | Single instruction |
+| `multi()` | 7 CU | ~1.4 KB | Same account layout |
+| `program()` | 18 CU | ~1.6 KB | **Different layouts (recommended)** |
+| Anchor Rust | ~150 CU | ~100+ KB | - |
 
-**anchor-zig is 20-30x faster than Anchor Rust!**
+**anchor-zig is 8-30x faster than Anchor Rust!**
 
-## 🚀 Quick Start (Recommended: zero_cu API)
+## 🚀 Quick Start (Recommended Pattern)
 
 ```zig
 const anchor = @import("sol_anchor_zig");
 const zero = anchor.zero_cu;
+const idl = anchor.idl_zero;
 const sol = anchor.sdk;
 
 // Program ID
-const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("YourProgramId111111111111111111111111111111");
+const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("YourProgram11111111111111111111111111111111");
 
-// Account data structure
+// ============================================================================
+// Account Data
+// ============================================================================
+
 const CounterData = struct {
     count: u64,
     authority: sol.PublicKey,
 };
 
-// Define accounts with constraints
+// ============================================================================
+// Instruction Accounts (each can have different layout)
+// ============================================================================
+
+const InitializeAccounts = struct {
+    payer: zero.Signer(0),
+    counter: zero.Mut(CounterData),
+    system_program: zero.Readonly(0),
+};
+
 const IncrementAccounts = struct {
-    authority: zero.Signer(0),                      // Must be signer
-    counter: zero.Account(CounterData, .{          // Typed data access
-        .owner = PROGRAM_ID,                        // Owner validation
+    authority: zero.Signer(0),
+    counter: zero.Account(CounterData, .{
+        .owner = PROGRAM_ID,
+        .has_one = &.{"authority"},  // Auto-validated!
     }),
 };
 
-// Instruction handler
+const CloseAccounts = struct {
+    authority: zero.Signer(0),
+    counter: zero.Account(CounterData, .{
+        .owner = PROGRAM_ID,
+        .has_one = &.{"authority"},
+    }),
+    destination: zero.Mut(0),
+};
+
+// ============================================================================
+// Handlers
+// ============================================================================
+
+pub fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
+    zero.writeDiscriminator(ctx.accounts.counter, "Counter");
+    const data = ctx.accounts.counter.getMut();
+    data.count = 0;
+    data.authority = ctx.accounts.payer.id().*;
+}
+
 pub fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
     ctx.accounts.counter.getMut().count += 1;
 }
 
-// Export (5 CU overhead!)
+pub fn close(ctx: zero.Ctx(CloseAccounts)) !void {
+    try zero.closeAccount(ctx.accounts.counter, ctx.accounts.destination);
+}
+
+// ============================================================================
+// Program Entry (RECOMMENDED)
+// ============================================================================
+
 comptime {
-    zero.entry(IncrementAccounts, "increment", increment);
+    zero.program(.{
+        zero.ixValidated("initialize", InitializeAccounts, initialize),
+        zero.ixValidated("increment", IncrementAccounts, increment),
+        zero.ixValidated("close", CloseAccounts, close),
+    });
 }
 ```
 
@@ -51,7 +96,7 @@ comptime {
 
 ```zig
 const Accounts = struct {
-    // Signer (must sign transaction, writable)
+    // Signer (must sign, writable)
     authority: zero.Signer(0),
     
     // Mutable account with typed data
@@ -60,12 +105,18 @@ const Accounts = struct {
     // Readonly account
     config: zero.Readonly(ConfigData),
     
-    // Account with constraints
+    // Account with constraints (auto-validated)
     vault: zero.Account(VaultData, .{
         .owner = PROGRAM_ID,
         .seeds = &.{ zero.seed("vault"), zero.seedAccount("authority") },
         .has_one = &.{"authority"},
     }),
+    
+    // Optional account
+    optional_config: zero.Optional(zero.Readonly(ConfigData)),
+    
+    // Program account
+    system_program: zero.Program(sol.system_program.id),
 };
 ```
 
@@ -73,31 +124,32 @@ const Accounts = struct {
 
 | Constraint | Syntax | Description |
 |------------|--------|-------------|
-| Owner | `.owner = PUBKEY` | Verify account owner |
-| Address | `.address = PUBKEY` | Verify account address |
-| Seeds (PDA) | `.seeds = &.{...}` | Verify PDA derivation |
+| owner | `.owner = PUBKEY` | Verify account owner |
+| address | `.address = PUBKEY` | Verify account address |
+| seeds (PDA) | `.seeds = &.{...}` | Verify PDA derivation |
 | has_one | `.has_one = &.{"field"}` | Verify field matches account |
-| Discriminator | `.discriminator = [8]u8` | Verify Anchor discriminator |
+| discriminator | `.discriminator = [8]u8` | Verify Anchor discriminator |
 
 ## 📤 Entry Points
 
 ```zig
-// Single instruction (5 CU)
+// RECOMMENDED: Different account layouts per instruction
 comptime {
-    zero.entry(Accounts, "transfer", transfer_handler);
+    zero.program(.{
+        zero.ixValidated("init", InitAccounts, init),
+        zero.ixValidated("process", ProcessAccounts, process),
+        zero.ixValidated("close", CloseAccounts, close),
+    });
 }
 
-// With auto-validation
-comptime {
-    zero.entryValidated(Accounts, "transfer", transfer_handler);
-}
+// Alternative: Single instruction (5 CU, max performance)
+comptime { zero.entry(Accounts, "transfer", transfer); }
 
-// Multi-instruction (7 CU)
+// Alternative: Same account layout (7 CU)
 comptime {
     zero.multi(Accounts, .{
-        zero.inst("initialize", init_handler),
-        zero.inst("transfer", transfer_handler),
-        zero.inst("close", close_handler),
+        zero.inst("deposit", deposit),
+        zero.inst("withdraw", withdraw),
     });
 }
 ```
@@ -121,91 +173,51 @@ const lamports = zero.rentExemptBalance(space);
 zero.writeDiscriminator(ctx.accounts.account, "AccountName");
 ```
 
-## 📊 Complete Example
+## 📊 IDL Generation
 
 ```zig
-const anchor = @import("sol_anchor_zig");
-const zero = anchor.zero_cu;
-const sol = anchor.sdk;
-
-const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("Counter111111111111111111111111111111111111");
-
-const CounterData = struct {
-    count: u64,
-    authority: sol.PublicKey,
-    bump: u8,
-};
-
-// Initialize accounts
-const InitAccounts = struct {
-    payer: zero.Signer(0),
-    authority: zero.Signer(0),
-    counter: zero.Mut(CounterData),
-};
-
-// Increment accounts
-const IncrementAccounts = struct {
-    authority: zero.Signer(0),
-    counter: zero.Account(CounterData, .{
-        .owner = PROGRAM_ID,
-        .has_one = &.{"authority"},
-    }),
-};
-
+// Define program metadata for IDL
 pub const Program = struct {
-    pub fn initialize(ctx: zero.Ctx(InitAccounts)) !void {
-        // Write discriminator
-        zero.writeDiscriminator(ctx.accounts.counter, "Counter");
-        
-        // Initialize data
-        const data = ctx.accounts.counter.getMut();
-        data.count = 0;
-        data.authority = ctx.accounts.authority.id().*;
-    }
+    pub const id = PROGRAM_ID;
+    pub const name = "my_program";
+    pub const version = "0.1.0";
 
-    pub fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
-        ctx.accounts.counter.getMut().count += 1;
-    }
+    pub const instructions = .{
+        idl.InstructionWithDocs("initialize", InitAccounts, InitArgs, "Initialize account"),
+        idl.InstructionWithDocs("process", ProcessAccounts, void, "Process data"),
+    };
+
+    pub const accounts = .{
+        idl.AccountDefWithDocs("MyAccount", MyData, "Account description"),
+    };
+
+    pub const errors = enum(u32) {
+        InvalidInput = 6000,
+    };
 };
 
-// Multi-instruction export
-comptime {
-    zero.multi(InitAccounts, .{
-        zero.inst("initialize", Program.initialize),
-    });
-    zero.multi(IncrementAccounts, .{
-        zero.inst("increment", Program.increment),
-    });
-}
+// Generate IDL JSON
+const json = try idl.generateJson(allocator, Program);
 ```
 
-## 📖 Standard API (Legacy)
+## 📦 Project Template
 
-For complex validation patterns or IDL generation, the standard API is still available:
+Use our template for new projects:
 
-```zig
-const anchor = @import("sol_anchor_zig");
-
-const Counter = anchor.Account(CounterData, .{
-    .discriminator = anchor.accountDiscriminator("Counter"),
-});
-
-const Accounts = struct {
-    payer: anchor.SignerMut,
-    counter: Counter,
-};
-
-fn initialize(ctx: anchor.Context(Accounts)) !void {
-    ctx.accounts.counter.data.count = 0;
-}
+```bash
+cp -r template/program my_program
+cd my_program
+# Edit src/main.zig, build.zig.zon
+../path/to/solana-zig/zig build
 ```
+
+See [template/program/README.md](template/program/README.md) for details.
 
 ## 🔗 Links
 
 - [Benchmark Results](benchmark/README.md)
 - [Feature Comparison](docs/FEATURE_COMPARISON.md)
-- [CU Optimization Guide](docs/CU_OPTIMIZATION.md)
-- [API Documentation](docs/README.md)
+- [Project Template](template/program/)
 
 ## 📦 Installation
 
@@ -213,8 +225,11 @@ Add to your `build.zig.zon`:
 
 ```zig
 .dependencies = .{
+    .solana_program_sdk = .{
+        .path = "path/to/solana-program-sdk-zig",
+    },
     .sol_anchor_zig = .{
-        .url = "https://github.com/pichtranst123/anchor-zig/archive/main.tar.gz",
+        .path = "path/to/anchor-zig",
     },
 },
 ```

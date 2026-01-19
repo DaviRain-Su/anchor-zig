@@ -1,0 +1,29 @@
+.{
+    .name = .my_program, // Change this to your program name
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0x0, // Will be auto-generated on first build
+    .dependencies = .{
+        .solana_program_sdk = .{
+            // Option 1: Local path (for development)
+            .path = "../path/to/solana-program-sdk-zig",
+            
+            // Option 2: Git URL (for production)
+            // .url = "https://github.com/user/solana-program-sdk-zig/archive/main.tar.gz",
+            // .hash = "...",
+        },
+        .sol_anchor_zig = .{
+            // Option 1: Local path (for development)
+            .path = "../path/to/anchor-zig",
+            
+            // Option 2: Git URL (for production)
+            // .url = "https://github.com/pichtranst123/anchor-zig/archive/main.tar.gz",
+            // .hash = "...",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
