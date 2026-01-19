@@ -229,6 +229,55 @@ pub fn AccountReadonly(comptime DataType: type, comptime constraints: AccountCon
     return ReadonlyWithConstraints(DataType, constraints);
 }
 
+/// Optional account (may not be present)
+///
+/// Usage:
+/// ```zig
+/// const Accounts = struct {
+///     authority: zero.Signer(0),
+///     optional_config: zero.Optional(zero.Readonly(ConfigData)),
+/// };
+/// ```
+pub fn Optional(comptime AccountType: type) type {
+    return struct {
+        pub const data_size = AccountType.data_size;
+        pub const DataType = if (@hasDecl(AccountType, "DataType")) AccountType.DataType else void;
+        pub const is_signer = if (@hasDecl(AccountType, "is_signer")) AccountType.is_signer else false;
+        pub const is_writable = if (@hasDecl(AccountType, "is_writable")) AccountType.is_writable else false;
+        pub const has_typed_data = if (@hasDecl(AccountType, "has_typed_data")) AccountType.has_typed_data else false;
+        pub const is_optional = true;
+        pub const InnerType = AccountType;
+        pub const CONSTRAINTS = if (@hasDecl(AccountType, "CONSTRAINTS")) AccountType.CONSTRAINTS else AccountConstraints{};
+    };
+}
+
+/// Program account (executable, fixed address)
+pub fn Program(comptime program_id: PublicKey) type {
+    return struct {
+        pub const data_size = 0;
+        pub const DataType = void;
+        pub const is_signer = false;
+        pub const is_writable = false;
+        pub const has_typed_data = false;
+        pub const CONSTRAINTS = AccountConstraints{
+            .address = program_id,
+        };
+    };
+}
+
+/// UncheckedAccount (no validation)
+pub fn UncheckedAccount(comptime DataOrLen: anytype) type {
+    const info = resolveDataType(DataOrLen);
+    return struct {
+        pub const data_size = info.size;
+        pub const DataType = info.Type;
+        pub const is_signer = false;
+        pub const is_writable = false;
+        pub const has_typed_data = info.has_type;
+        pub const CONSTRAINTS = AccountConstraints{};
+    };
+}
+
 // Aliases for compatibility
 pub const ZeroSigner = Signer;
 pub const ZeroMut = Mut;

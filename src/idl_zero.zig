@@ -61,18 +61,35 @@ pub fn Instruction(
     comptime Accounts: type,
     comptime Args: type,
 ) type {
+    return InstructionWithDocs(name, Accounts, Args, null);
+}
+
+/// Instruction definition with documentation
+pub fn InstructionWithDocs(
+    comptime name: []const u8,
+    comptime Accounts: type,
+    comptime Args: type,
+    comptime docs: ?[]const u8,
+) type {
     return struct {
         pub const instruction_name = name;
         pub const AccountsType = Accounts;
         pub const ArgsType = Args;
+        pub const documentation = docs;
     };
 }
 
 /// Account definition for IDL
 pub fn AccountDef(comptime name: []const u8, comptime Data: type) type {
+    return AccountDefWithDocs(name, Data, null);
+}
+
+/// Account definition with documentation
+pub fn AccountDefWithDocs(comptime name: []const u8, comptime Data: type, comptime docs: ?[]const u8) type {
     return struct {
         pub const account_name = name;
         pub const DataType = Data;
+        pub const documentation = docs;
     };
 }
 
@@ -205,6 +222,13 @@ fn buildInstruction(
     const name = InstrType.instruction_name;
     try putString(a, &obj, "name", name);
 
+    // Documentation
+    if (@hasDecl(InstrType, "documentation") and InstrType.documentation != null) {
+        var docs = std.json.Array.init(a);
+        try docs.append(jsonString(a, InstrType.documentation.?));
+        try obj.put(try a.dupe(u8, "docs"), .{ .array = docs });
+    }
+
     // Discriminator
     const disc = comptime discriminator_mod.instructionDiscriminator(name);
     try obj.put(try a.dupe(u8, "discriminator"), try discriminatorJson(a, disc));
@@ -239,37 +263,50 @@ fn buildInstructionAccounts(a: Allocator, comptime Accounts: type) !std.json.Val
         // Optional constraints description
         if (@hasDecl(field.type, "CONSTRAINTS")) {
             const C = field.type.CONSTRAINTS;
-            if (C.owner != null or C.seeds != null) {
-                // Add PDA info if present
-                if (C.seeds != null) {
-                    var pda_obj = std.json.ObjectMap.init(a);
-                    var seeds_arr = std.json.Array.init(a);
 
-                    inline for (C.seeds.?) |seed| {
-                        var seed_obj = std.json.ObjectMap.init(a);
-                        switch (seed) {
-                            .literal => |lit| {
-                                try putString(a, &seed_obj, "kind", "const");
-                                try putString(a, &seed_obj, "value", lit);
-                            },
-                            .account => |acc| {
-                                try putString(a, &seed_obj, "kind", "account");
-                                try putString(a, &seed_obj, "path", acc);
-                            },
-                            .field => |fld| {
-                                try putString(a, &seed_obj, "kind", "field");
-                                try putString(a, &seed_obj, "path", fld);
-                            },
-                            .bump => {
-                                try putString(a, &seed_obj, "kind", "bump");
-                            },
-                        }
-                        try seeds_arr.append(.{ .object = seed_obj });
+            // Add PDA info if present
+            if (C.seeds != null) {
+                var pda_obj = std.json.ObjectMap.init(a);
+                var seeds_arr = std.json.Array.init(a);
+
+                inline for (C.seeds.?) |seed| {
+                    var seed_obj = std.json.ObjectMap.init(a);
+                    switch (seed) {
+                        .literal => |lit| {
+                            try putString(a, &seed_obj, "kind", "const");
+                            try putString(a, &seed_obj, "value", lit);
+                        },
+                        .account => |acc| {
+                            try putString(a, &seed_obj, "kind", "account");
+                            try putString(a, &seed_obj, "path", acc);
+                        },
+                        .field => |fld| {
+                            try putString(a, &seed_obj, "kind", "field");
+                            try putString(a, &seed_obj, "path", fld);
+                        },
+                        .bump => {
+                            try putString(a, &seed_obj, "kind", "bump");
+                        },
                     }
-
-                    try pda_obj.put(try a.dupe(u8, "seeds"), .{ .array = seeds_arr });
-                    try obj.put(try a.dupe(u8, "pda"), .{ .object = pda_obj });
+                    try seeds_arr.append(.{ .object = seed_obj });
                 }
+
+                try pda_obj.put(try a.dupe(u8, "seeds"), .{ .array = seeds_arr });
+                try obj.put(try a.dupe(u8, "pda"), .{ .object = pda_obj });
+            }
+
+            // Add relations (has_one)
+            if (C.has_one != null) {
+                var relations = std.json.Array.init(a);
+                inline for (C.has_one.?) |rel| {
+                    try relations.append(jsonString(a, rel));
+                }
+                try obj.put(try a.dupe(u8, "relations"), .{ .array = relations });
+            }
+
+            // Add optional flag
+            if (@hasDecl(field.type, "is_optional") and field.type.is_optional) {
+                try obj.put(try a.dupe(u8, "optional"), .{ .bool = true });
             }
         }
 
@@ -474,7 +511,7 @@ fn typeToJson(
         return .{ .object = obj };
     }
 
-    // Enum
+    // Enum (simple)
     if (info == .@"enum") {
         try registerType(a, T, type_registry, type_defs);
         const type_name = @typeName(T);
@@ -484,6 +521,23 @@ fn typeToJson(
         try putString(a, &def_obj, "name", short_name);
         try obj.put(try a.dupe(u8, "defined"), .{ .object = def_obj });
         return .{ .object = obj };
+    }
+
+    // Union (Rust enum with data)
+    if (info == .@"union") {
+        try registerType(a, T, type_registry, type_defs);
+        const type_name = @typeName(T);
+        const short_name = shortTypeName(type_name);
+        var obj = std.json.ObjectMap.init(a);
+        var def_obj = std.json.ObjectMap.init(a);
+        try putString(a, &def_obj, "name", short_name);
+        try obj.put(try a.dupe(u8, "defined"), .{ .object = def_obj });
+        return .{ .object = obj };
+    }
+
+    // String type
+    if (info == .pointer and info.pointer.size == .Slice and info.pointer.child == u8) {
+        return jsonString(a, "string");
     }
 
     // Fallback
@@ -525,6 +579,34 @@ fn registerType(
         inline for (info.@"enum".fields) |field| {
             var var_obj = std.json.ObjectMap.init(a);
             try putString(a, &var_obj, "name", field.name);
+            try variants.append(.{ .object = var_obj });
+        }
+        try type_obj.put(try a.dupe(u8, "variants"), .{ .array = variants });
+        try obj.put(try a.dupe(u8, "type"), .{ .object = type_obj });
+        try type_defs.append(.{ .object = obj });
+    } else if (info == .@"union") {
+        // Tagged union (Rust enum with data)
+        var obj = std.json.ObjectMap.init(a);
+        try putString(a, &obj, "name", short_name);
+
+        var type_obj = std.json.ObjectMap.init(a);
+        try putString(a, &type_obj, "kind", "enum");
+
+        var variants = std.json.Array.init(a);
+        inline for (info.@"union".fields) |field| {
+            var var_obj = std.json.ObjectMap.init(a);
+            try putString(a, &var_obj, "name", field.name);
+
+            // Add field type if not void
+            if (field.type != void) {
+                var fields_arr = std.json.Array.init(a);
+                var field_obj = std.json.ObjectMap.init(a);
+                try putString(a, &field_obj, "name", "data");
+                try field_obj.put(try a.dupe(u8, "type"), try typeToJson(a, field.type, type_registry, type_defs));
+                try fields_arr.append(.{ .object = field_obj });
+                try var_obj.put(try a.dupe(u8, "fields"), .{ .array = fields_arr });
+            }
+
             try variants.append(.{ .object = var_obj });
         }
         try type_obj.put(try a.dupe(u8, "variants"), .{ .array = variants });

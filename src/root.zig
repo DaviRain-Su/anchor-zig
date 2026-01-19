@@ -166,8 +166,14 @@ pub const idl_zero = @import("idl_zero.zig");
 /// IDL instruction definition
 pub const IdlInstruction = idl_zero.Instruction;
 
+/// IDL instruction definition with docs
+pub const IdlInstructionWithDocs = idl_zero.InstructionWithDocs;
+
 /// IDL account definition
 pub const IdlAccountDef = idl_zero.AccountDef;
+
+/// IDL account definition with docs
+pub const IdlAccountDefWithDocs = idl_zero.AccountDefWithDocs;
 
 /// IDL event definition
 pub const IdlEventDef = idl_zero.EventDef;
