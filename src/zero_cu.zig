@@ -634,6 +634,22 @@ pub fn ZeroAccountTyped(
             if (!self.isWritable()) return error.ConstraintMut;
         }
 
+        /// Get Account.Info for CPI calls
+        pub inline fn info(self: Self) SdkAccount.Info {
+            const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
+            const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + DATA_LEN_OFFSET));
+            return SdkAccount.Info{
+                .id = @ptrCast(@alignCast(self.input + ID_OFFSET)),
+                .lamports = @ptrCast(@alignCast(ptr + LAMPORTS_OFFSET)),
+                .data_len = data_len_ptr.*,
+                .data = ptr + DATA_OFFSET,
+                .owner_id = @ptrCast(@alignCast(self.input + OWNER_OFFSET)),
+                .is_signer = if (self.isSigner()) 1 else 0,
+                .is_writable = if (self.isWritable()) 1 else 0,
+                .is_executable = if (self.isExecutable()) 1 else 0,
+            };
+        }
+
         // AccountLoader-style aliases for zero-copy access
         
         /// Load account data as read-only (zero-copy)
