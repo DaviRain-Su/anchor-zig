@@ -148,8 +148,8 @@
 |------|-------------|-----------|------|
 | declare_id! | `pub const id = ...` | ✅ |
 | #[program] | `comptime { zero.entry(...) }` | ✅ |
-| Context bumps | ✅ | ⚠️ 需手动处理 |
-| Remaining accounts | ✅ | ⚠️ 需手动处理 |
+| Context bumps | ✅ | ✅ `ctx.deriveBumps()` / `ctx.getBump("name")` |
+| Remaining accounts | ✅ | ✅ `ctx.remainingAccounts()` |
 | Account close refund | ✅ | ✅ |
 | Zero-copy | AccountLoader | ❌ |
 | Access control | ✅ | 手动实现 |
@@ -164,9 +164,7 @@
 ### 约束系统 (可选)
 - **constraint** - 自定义表达式约束 (用户可手动实现)
 
-### 其他 (可选)
-- **Context bumps** - 自动 bump 存储
-- **Remaining accounts** - 额外账户处理
+
 
 ---
 

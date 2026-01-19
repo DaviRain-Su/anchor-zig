@@ -1059,6 +1059,225 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
             }
             return .{};
         }
+
+        // ====================================================================
+        // Bumps Support
+        // ====================================================================
+
+        /// Bumps type - stores PDA bump seeds by field name
+        pub const Bumps = blk: {
+            var bump_fields: [fields.len]std.builtin.Type.StructField = undefined;
+            var bump_count: usize = 0;
+
+            for (fields) |field| {
+                const C = getConstraints(field.type);
+                // Only include fields with seeds (PDA accounts)
+                if (C.seeds != null) {
+                    bump_fields[bump_count] = .{
+                        .name = field.name,
+                        .type = u8,
+                        .default_value_ptr = null,
+                        .is_comptime = false,
+                        .alignment = 1,
+                    };
+                    bump_count += 1;
+                }
+            }
+
+            if (bump_count == 0) {
+                // No PDA accounts, return empty struct
+                break :blk @Type(.{
+                    .@"struct" = .{
+                        .layout = .auto,
+                        .fields = &.{},
+                        .decls = &.{},
+                        .is_tuple = false,
+                    },
+                });
+            }
+
+            break :blk @Type(.{
+                .@"struct" = .{
+                    .layout = .auto,
+                    .fields = bump_fields[0..bump_count],
+                    .decls = &.{},
+                    .is_tuple = false,
+                },
+            });
+        };
+
+        /// Derive bumps for all PDA accounts
+        /// Call this after validate() to get the bump values
+        pub fn deriveBumps(self: Self) !Bumps {
+            var bumps: Bumps = undefined;
+            const program_id = self.programId();
+
+            inline for (fields) |field| {
+                const C = getConstraints(field.type);
+
+                if (C.seeds) |seeds| {
+                    // If explicit bump is provided, use it
+                    if (C.bump) |explicit_bump| {
+                        @field(bumps, field.name) = explicit_bump;
+                    } else {
+                        // Derive bump from seeds
+                        var seed_slices: [16][]const u8 = undefined;
+                        var seed_count: usize = 0;
+
+                        inline for (seeds) |s| {
+                            switch (s) {
+                                .literal => |lit| {
+                                    seed_slices[seed_count] = lit;
+                                    seed_count += 1;
+                                },
+                                .account => |acc_name| {
+                                    const ref_acc = @field(self.accounts, acc_name);
+                                    seed_slices[seed_count] = &ref_acc.id().bytes;
+                                    seed_count += 1;
+                                },
+                                .field => |_| {
+                                    // Field seeds need data access
+                                },
+                                .bump => |_| {
+                                    // Skip bump in seed derivation
+                                },
+                            }
+                        }
+
+                        const derived = sol.public_key.findProgramAddressSlice(
+                            seed_slices[0..seed_count],
+                            program_id.*,
+                        ) catch return error.BumpDerivationFailed;
+
+                        @field(bumps, field.name) = derived.bump;
+                    }
+                }
+            }
+
+            return bumps;
+        }
+
+        /// Get bump for a specific account by name
+        pub fn getBump(self: Self, comptime name: []const u8) !u8 {
+            const bumps = try self.deriveBumps();
+            return @field(bumps, name);
+        }
+
+        // ====================================================================
+        // Remaining Accounts Support
+        // ====================================================================
+
+        /// Number of declared accounts
+        pub const DECLARED_ACCOUNTS: usize = fields.len;
+
+        /// Get the total number of accounts passed to the instruction
+        pub fn totalAccounts(self: Self) usize {
+            const num_accounts: *const u64 = @ptrCast(@alignCast(self.input));
+            return @intCast(num_accounts.*);
+        }
+
+        /// Get remaining accounts (accounts beyond the declared ones)
+        /// Returns an iterator over the remaining accounts
+        pub fn remainingAccounts(self: Self) RemainingAccountsIterator {
+            const total = self.totalAccounts();
+            const remaining_count = if (total > DECLARED_ACCOUNTS) total - DECLARED_ACCOUNTS else 0;
+
+            // Calculate offset to first remaining account
+            const base_offset: usize = 8; // num_accounts
+            var offset: usize = base_offset;
+
+            // Skip declared accounts
+            for (data_lens) |data_len| {
+                offset += accountSize(data_len);
+            }
+
+            return RemainingAccountsIterator{
+                .input = self.input,
+                .offset = offset,
+                .remaining = remaining_count,
+                .index = 0,
+            };
+        }
+
+        /// Iterator for remaining accounts
+        pub const RemainingAccountsIterator = struct {
+            input: [*]const u8,
+            offset: usize,
+            remaining: usize,
+            index: usize,
+
+            pub fn next(self: *RemainingAccountsIterator) ?RemainingAccount {
+                if (self.index >= self.remaining) return null;
+
+                const account = RemainingAccount{
+                    .input = self.input,
+                    .offset = self.offset,
+                };
+
+                // Move to next account
+                // Account structure: dup_info (1) + is_signer (1) + is_writable (1) + 
+                //                    is_executable (1) + padding (4) + key (32) + owner (32) +
+                //                    lamports (8) + data_len (8) + data + padding + rent_epoch (8)
+                const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + self.offset + ACCOUNT_HEADER_SIZE - 8));
+                const data_len = data_len_ptr.*;
+                const aligned_len = (data_len + ACCOUNT_DATA_PADDING + 8 - 1) & ~@as(u64, 7);
+                self.offset += ACCOUNT_HEADER_SIZE + aligned_len + 8; // +8 for rent_epoch
+                self.index += 1;
+
+                return account;
+            }
+
+            pub fn count(self: RemainingAccountsIterator) usize {
+                return self.remaining;
+            }
+        };
+
+        /// A remaining account (parsed on-demand)
+        pub const RemainingAccount = struct {
+            input: [*]const u8,
+            offset: usize,
+
+            pub fn id(self: RemainingAccount) *const PublicKey {
+                return @ptrCast(@alignCast(self.input + self.offset + 8));
+            }
+
+            pub fn ownerId(self: RemainingAccount) *const PublicKey {
+                return @ptrCast(@alignCast(self.input + self.offset + 8 + 32));
+            }
+
+            pub fn lamports(self: RemainingAccount) *u64 {
+                const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
+                return @ptrCast(@alignCast(ptr + self.offset + 8 + 32 + 32));
+            }
+
+            pub fn isSigner(self: RemainingAccount) bool {
+                return self.input[self.offset + 1] != 0;
+            }
+
+            pub fn isWritable(self: RemainingAccount) bool {
+                return self.input[self.offset + 2] != 0;
+            }
+
+            pub fn dataSlice(self: RemainingAccount) []const u8 {
+                const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + self.offset + ACCOUNT_HEADER_SIZE - 8));
+                const data_offset = self.offset + ACCOUNT_HEADER_SIZE;
+                return (self.input + data_offset)[0..data_len_ptr.*];
+            }
+
+            pub fn info(self: RemainingAccount) SdkAccount.Info {
+                const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + self.offset + ACCOUNT_HEADER_SIZE - 8));
+                return SdkAccount.Info{
+                    .id = self.id(),
+                    .lamports = self.lamports(),
+                    .data = @constCast(@ptrCast(self.input + self.offset + ACCOUNT_HEADER_SIZE)),
+                    .data_len = data_len_ptr.*,
+                    .owner_id = self.ownerId(),
+                    .is_signer = if (self.isSigner()) 1 else 0,
+                    .is_writable = if (self.isWritable()) 1 else 0,
+                    .is_executable = 0,
+                };
+            }
+        };
     };
 }
 
@@ -1663,6 +1882,140 @@ pub fn ProgramContext(comptime Accounts: type) type {
                     }
                 }
             }
+        }
+
+        // ====================================================================
+        // Bumps Support
+        // ====================================================================
+
+        /// Helper to get constraints
+        fn getConstraints(comptime T: type) AccountConstraints {
+            if (@hasDecl(T, "CONSTRAINTS")) {
+                return T.CONSTRAINTS;
+            }
+            return .{};
+        }
+
+        /// Bumps type - stores PDA bump seeds by field name
+        pub const Bumps = blk: {
+            var bump_fields: [fields.len]std.builtin.Type.StructField = undefined;
+            var bump_count: usize = 0;
+
+            for (fields) |field| {
+                const C = getConstraints(field.type);
+                if (C.seeds != null) {
+                    bump_fields[bump_count] = .{
+                        .name = field.name,
+                        .type = u8,
+                        .default_value_ptr = null,
+                        .is_comptime = false,
+                        .alignment = 1,
+                    };
+                    bump_count += 1;
+                }
+            }
+
+            if (bump_count == 0) {
+                break :blk @Type(.{
+                    .@"struct" = .{
+                        .layout = .auto,
+                        .fields = &.{},
+                        .decls = &.{},
+                        .is_tuple = false,
+                    },
+                });
+            }
+
+            break :blk @Type(.{
+                .@"struct" = .{
+                    .layout = .auto,
+                    .fields = bump_fields[0..bump_count],
+                    .decls = &.{},
+                    .is_tuple = false,
+                },
+            });
+        };
+
+        /// Derive bumps for all PDA accounts
+        pub fn deriveBumps(self: *const Self) !Bumps {
+            var bumps: Bumps = undefined;
+
+            inline for (fields) |field| {
+                const C = getConstraints(field.type);
+
+                if (C.seeds) |seeds| {
+                    if (C.bump) |explicit_bump| {
+                        @field(bumps, field.name) = explicit_bump;
+                    } else {
+                        var seed_slices: [16][]const u8 = undefined;
+                        var seed_count: usize = 0;
+
+                        inline for (seeds) |s| {
+                            switch (s) {
+                                .literal => |lit| {
+                                    seed_slices[seed_count] = lit;
+                                    seed_count += 1;
+                                },
+                                .account => |acc_name| {
+                                    const acc_idx = comptime inner: {
+                                        for (fields, 0..) |f, idx| {
+                                            if (std.mem.eql(u8, f.name, acc_name)) break :inner idx;
+                                        }
+                                        @compileError("seed account not found: " ++ acc_name);
+                                    };
+                                    seed_slices[seed_count] = &self.context.accounts[acc_idx].id().bytes;
+                                    seed_count += 1;
+                                },
+                                .field => |_| {},
+                                .bump => |_| {},
+                            }
+                        }
+
+                        const derived = sol.public_key.findProgramAddressSlice(
+                            seed_slices[0..seed_count],
+                            self.context.program_id.*,
+                        ) catch return error.BumpDerivationFailed;
+
+                        @field(bumps, field.name) = derived.bump;
+                    }
+                }
+            }
+
+            return bumps;
+        }
+
+        /// Get bump for a specific account by name
+        pub fn getBump(self: *const Self, comptime name: []const u8) !u8 {
+            const bumps = try self.deriveBumps();
+            return @field(bumps, name);
+        }
+
+        // ====================================================================
+        // Remaining Accounts Support
+        // ====================================================================
+
+        /// Number of declared accounts
+        pub const DECLARED_ACCOUNTS: usize = fields.len;
+
+        /// Get the total number of accounts passed to the instruction
+        pub fn totalAccounts(self: *const Self) usize {
+            return self.context.accounts.len;
+        }
+
+        /// Get remaining accounts (accounts beyond the declared ones)
+        pub fn remainingAccounts(self: *const Self) []const sol.account.Account {
+            if (self.context.accounts.len > DECLARED_ACCOUNTS) {
+                return self.context.accounts[DECLARED_ACCOUNTS..];
+            }
+            return &.{};
+        }
+
+        /// Get remaining accounts count
+        pub fn remainingAccountsCount(self: *const Self) usize {
+            if (self.context.accounts.len > DECLARED_ACCOUNTS) {
+                return self.context.accounts.len - DECLARED_ACCOUNTS;
+            }
+            return 0;
         }
     };
 }
