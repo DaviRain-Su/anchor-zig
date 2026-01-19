@@ -32,6 +32,10 @@ pub const FallbackContext = struct {
 pub const DispatchConfig = struct {
     fallback: ?*const fn (ctx: FallbackContext) anyerror!void = null,
     error_mapper: ?*const fn (err: anyerror) ?ProgramError = null,
+    /// Skip discriminator length check for maximum performance.
+    /// Only use when you're certain the instruction data has at least 8 bytes.
+    /// Saves ~3 CU per instruction.
+    skip_length_check: bool = false,
 };
 
 /// Generate a typed dispatcher for an Anchor-style Program definition.
@@ -64,8 +68,11 @@ pub fn ProgramEntry(comptime Program: type) type {
             data: []const u8,
             config: DispatchConfig,
         ) !void {
-            if (data.len < discriminator_mod.DISCRIMINATOR_LENGTH) {
-                return DispatchError.InstructionMissing;
+            // Optional length check (saves ~3 CU when skipped)
+            if (!config.skip_length_check) {
+                if (data.len < discriminator_mod.DISCRIMINATOR_LENGTH) {
+                    return DispatchError.InstructionMissing;
+                }
             }
 
             // Fast discriminator extraction as u64

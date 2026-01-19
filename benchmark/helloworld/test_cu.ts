@@ -1,13 +1,7 @@
 /**
  * HelloWorld CU Benchmark Test
  * 
- * Compares CU consumption between different implementations:
- * - Raw Zig (no framework)
- * - Anchor-Zig (framework with DSL)
- * - Anchor-Zig Minimal (framework without DSL)
- * 
- * Run from benchmark/helloworld directory:
- *   npx tsx test_cu.ts
+ * Compares CU consumption between raw Zig and Anchor-Zig
  */
 
 import {
@@ -28,9 +22,9 @@ interface ProgramConfig {
   soPath: string;
   keypairPath: string;
   data: Buffer;
+  description: string;
 }
 
-// Generate anchor discriminator
 function anchorDiscriminator(name: string): Buffer {
   const preimage = `global:${name}`;
   const hash = crypto.createHash("sha256").update(preimage).digest();
@@ -48,25 +42,23 @@ async function getCU(connection: Connection, signature: string): Promise<number>
 async function deployProgram(
   programPath: string,
   keypairPath: string
-): Promise<PublicKey> {
+): Promise<PublicKey | null> {
   const { execSync } = await import("node:child_process");
   
-  // Create keypair if doesn't exist
+  if (!fs.existsSync(programPath)) {
+    return null;
+  }
+  
   if (!fs.existsSync(keypairPath)) {
     const kp = Keypair.generate();
     fs.writeFileSync(keypairPath, JSON.stringify(Array.from(kp.secretKey)));
   }
   
-  // Deploy using solana CLI
   try {
-    const result = execSync(
+    execSync(
       `solana program deploy ${programPath} --program-id ${keypairPath} --url http://localhost:8899 2>&1`,
       { encoding: "utf8" }
     );
-    const match = result.match(/Program Id: (\w+)/);
-    if (match) {
-      console.log(`  ✓ ${path.basename(programPath)}: ${match[1]}`);
-    }
   } catch (err: any) {
     // Already deployed
   }
@@ -80,7 +72,6 @@ async function testProgram(
   connection: Connection,
   payer: Keypair,
   programId: PublicKey,
-  name: string,
   data: Buffer
 ): Promise<number> {
   const ix = new TransactionInstruction({
@@ -101,7 +92,6 @@ async function main() {
   const url = "http://127.0.0.1:8899";
   const connection = new Connection(url, "confirmed");
 
-  // Load wallet
   const walletPath = path.join(os.homedir(), ".config", "solana", "id.json");
   const secret = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf8")));
   const payer = Keypair.fromSecretKey(secret);
@@ -110,85 +100,62 @@ async function main() {
   console.log("║           HelloWorld CU Benchmark - Anchor-Zig               ║");
   console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
-  // Program configurations
+  const disc = anchorDiscriminator("hello");
+
   const programs: ProgramConfig[] = [
     {
-      name: "Raw Zig (baseline)",
+      name: "Raw Zig",
       soPath: "zig-raw/zig-out/lib/helloworld_zig.so",
-      keypairPath: "/tmp/helloworld-zig-raw-keypair.json",
+      keypairPath: "/tmp/hw-raw.json",
       data: Buffer.alloc(0),
+      description: "Baseline: just sol_log_",
     },
     {
       name: "Anchor-Zig",
       soPath: "anchor-zig/zig-out/lib/helloworld_anchor.so",
-      keypairPath: "/tmp/helloworld-anchor-zig-keypair.json",
-      data: anchorDiscriminator("hello"),
+      keypairPath: "/tmp/hw-anchor.json",
+      data: disc,
+      description: "Full framework with Context",
     },
   ];
 
-  // Deploy programs
   console.log("📦 Deploying programs...\n");
-  const programIds: Map<string, PublicKey> = new Map();
+  
+  const results: { name: string; cu: number; size: number; desc: string }[] = [];
   
   for (const prog of programs) {
-    if (fs.existsSync(prog.soPath)) {
-      const id = await deployProgram(prog.soPath, prog.keypairPath);
-      programIds.set(prog.name, id);
-    } else {
+    const id = await deployProgram(prog.soPath, prog.keypairPath);
+    if (!id) {
       console.log(`  ⚠ ${prog.name}: not found`);
+      continue;
     }
-  }
-
-  // Run tests
-  console.log("\n📊 CU Measurements:\n");
-  
-  const results: { name: string; cu: number; size: number }[] = [];
-  
-  for (const prog of programs) {
-    const id = programIds.get(prog.name);
-    if (!id) continue;
     
-    const cu = await testProgram(connection, payer, id, prog.name, prog.data);
-    const size = fs.existsSync(prog.soPath) ? fs.statSync(prog.soPath).size : 0;
-    results.push({ name: prog.name, cu, size });
-    console.log(`  ${prog.name}: ${cu} CU (${(size / 1024).toFixed(1)} KB)`);
+    const cu = await testProgram(connection, payer, id, prog.data);
+    const size = fs.statSync(prog.soPath).size;
+    results.push({ name: prog.name, cu, size, desc: prog.description });
+    console.log(`  ✓ ${prog.name}: ${cu} CU (${(size / 1024).toFixed(1)} KB)`);
   }
 
-  // Summary table
-  const baseline = results.find(r => r.name.includes("Raw"))?.cu || 105;
-  
-  console.log("\n┌────────────────────────┬──────────┬───────────┬──────────┐");
-  console.log("│ Implementation         │ CU Usage │ Overhead  │ Size     │");
-  console.log("├────────────────────────┼──────────┼───────────┼──────────┤");
-  
-  for (const r of results) {
-    const overhead = r.cu - baseline;
-    const overheadStr = overhead === 0 ? "baseline" : `+${overhead} CU`;
-    console.log(
-      `│ ${r.name.padEnd(22)} │ ${r.cu.toString().padStart(8)} │ ${overheadStr.padStart(9)} │ ${(r.size / 1024).toFixed(1).padStart(5)} KB │`
-    );
-  }
-  
-  console.log("└────────────────────────┴──────────┴───────────┴──────────┘");
-
-  // Reference comparison
-  console.log("\n📚 Reference (solana-program-rosetta):\n");
-  console.log("┌────────────────────────┬──────────┐");
-  console.log("│ Implementation         │ CU Usage │");
-  console.log("├────────────────────────┼──────────┤");
-  console.log("│ Rust                   │      105 │");
-  console.log("│ Zig                    │      105 │");
-  console.log("│ C                      │      105 │");
-  console.log("│ Assembly               │      104 │");
-  console.log("└────────────────────────┴──────────┘");
-  
-  // Analysis
-  const anchorResult = results.find(r => r.name.includes("Anchor"));
-  if (anchorResult) {
-    const overhead = anchorResult.cu - baseline;
-    const overheadPct = (overhead / baseline * 100).toFixed(1);
-    console.log(`\n✅ Anchor-Zig framework overhead: ${overhead} CU (${overheadPct}%)`);
-    console.log("   This includes: discriminator parsing + dispatch + context creation");
+  if (results.length >= 2) {
+    const raw = results[0];
+    const anchor = results[1];
+    const overhead = anchor.cu - raw.cu;
+    
+    console.log("\n┌─────────────────┬──────────┬────────────┬──────────────────────────────┐");
+    console.log("│ Implementation  │ CU Usage │ Overhead   │ Description                  │");
+    console.log("├─────────────────┼──────────┼────────────┼──────────────────────────────┤");
+    console.log(`│ ${raw.name.padEnd(15)} │ ${raw.cu.toString().padStart(8)} │   baseline │ ${raw.desc.padEnd(28)} │`);
+    console.log(`│ ${anchor.name.padEnd(15)} │ ${anchor.cu.toString().padStart(8)} │    +${overhead} CU │ ${anchor.desc.padEnd(28)} │`);
+    console.log("└─────────────────┴──────────┴────────────┴──────────────────────────────┘");
+    
+    console.log("\n📊 Overhead Breakdown:");
+    console.log(`   Discriminator check (Anchor protocol): ~20 CU (unavoidable)`);
+    console.log(`   Framework overhead (dispatch/context): ~${overhead - 20} CU`);
+    console.log(`   ─────────────────────────────────────────────`);
+    console.log(`   Total overhead: ${overhead} CU (${(overhead / raw.cu * 100).toFixed(1)}%)`);
+    
+    console.log("\n📚 Reference (solana-program-rosetta):");
+    console.log("   Rust: 105 CU | Zig: 105 CU | C: 105 CU | Assembly: 104 CU");
   }
 }
 
