@@ -50,6 +50,7 @@ interface ProgramInfo {
 
 const PROGRAMS: ProgramInfo[] = [
   { name: "anchor-spl", path: "./anchor-spl/zig-out/lib/token_cpi_anchor_spl.so" },
+  { name: "zero-cu", path: "./zero-cu/zig-out/lib/token_cpi_zero_cu.so" },
 ];
 
 function deployProgram(programPath: string): string | null {
@@ -104,6 +105,11 @@ async function measureCU(
   try {
     const tx = new Transaction().add(ix);
     const sim = await connection.simulateTransaction(tx, [payer, ...signers]);
+    if (sim.value.err) {
+      console.error(`  Simulation error: ${JSON.stringify(sim.value.err)}`);
+      console.error(`  Logs: ${JSON.stringify(sim.value.logs, null, 2)}`);
+      return -1;
+    }
     return sim.value.unitsConsumed || -1;
   } catch (e: any) {
     console.error(`  Transaction error: ${e.message}`);
