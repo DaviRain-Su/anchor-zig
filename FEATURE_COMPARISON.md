@@ -23,12 +23,11 @@
 | `UncheckedAccount<'info>` | `zero.UncheckedAccount(0)` | ✅ | 不检查的账户 |
 | `Program<'info, T>` | `zero.Program(ID)` | ✅ | 程序账户 |
 | `Option<Account<...>>` | `zero.Optional(...)` | ✅ | 可选账户 |
-| `AccountLoader<'info, T>` | ❌ | ❌ | 零拷贝大账户 |
+| `AccountLoader<'info, T>` | `zero.AccountLoader(T, .{})` | ✅ | 零拷贝大账户 |
 | `Interface<'info, T>` | ❌ | ❌ | 接口账户 |
 | `InterfaceAccount<'info, T>` | ❌ | ❌ | 接口账户 |
 
 ### 缺失功能：
-- **AccountLoader** - 用于零拷贝访问大账户 (>10KB)
 - **Interface/InterfaceAccount** - 用于多程序兼容 (如 Token-2022)
 
 ---
@@ -160,7 +159,6 @@
 ## 剩余待实现功能
 
 ### 账户类型 (低优先级)
-- **AccountLoader** - 零拷贝大账户 (>10KB 场景)
 - **Interface/InterfaceAccount** - Token-2022 等多程序兼容
 
 ### 约束系统 (可选)
@@ -268,6 +266,5 @@ fn initialize(ctx) !void {
 
 ### 剩余待实现 (低优先级)
 
-- AccountLoader (零拷贝大账户)
 - Interface/InterfaceAccount (Token-2022)
 - constraint 表达式 (用户可手动实现)

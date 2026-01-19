@@ -312,6 +312,166 @@ pub fn UncheckedAccount(comptime DataOrLen: anytype) type {
     };
 }
 
+/// AccountLoader - Zero-copy access for large accounts
+///
+/// Similar to Rust Anchor's AccountLoader, provides direct pointer access
+/// to account data without copying. Ideal for accounts >10KB.
+///
+/// ## Usage
+///
+/// ```zig
+/// const LargeData = extern struct {
+///     values: [10000]u64,
+/// };
+///
+/// const Accounts = struct {
+///     large_account: zero.AccountLoader(LargeData, .{ .mut = true }),
+/// };
+///
+/// fn process(ctx: zero.Ctx(Accounts)) !void {
+///     // Zero-copy mutable access
+///     const data = ctx.accounts.large_account.loadMut();
+///     data.values[0] = 42;
+///
+///     // Or read-only access
+///     const readonly = ctx.accounts.large_account.load();
+///     _ = readonly.values[0];
+/// }
+/// ```
+///
+/// ## Important
+///
+/// - DataType must be `extern struct` for correct memory layout
+/// - Account data is accessed directly, no serialization overhead
+/// - Discriminator (8 bytes) is automatically skipped
+pub fn AccountLoader(comptime DataType: type, comptime constraints: AccountConstraints) type {
+    return struct {
+        /// Raw pointer to account data (after discriminator)
+        data_ptr: [*]u8,
+        /// Account data length
+        data_len: usize,
+        /// Account info for other operations
+        account_info: SdkAccount,
+
+        const Self = @This();
+
+        /// Size includes 8-byte discriminator + data
+        pub const data_size = 8 + @sizeOf(DataType);
+        pub const DataTypeInner = DataType;
+        pub const is_signer = constraints.signer;
+        pub const is_writable = constraints.writable;
+        pub const has_typed_data = true;
+        pub const is_zero_copy = true;
+
+        pub const CONSTRAINTS = AccountConstraints{
+            .owner = constraints.owner,
+            .address = constraints.address,
+            .seeds = constraints.seeds,
+            .has_one = constraints.has_one,
+            .signer = constraints.signer,
+            .writable = constraints.writable,
+            .discriminator = constraints.discriminator,
+            .close = constraints.close,
+            .init = constraints.init,
+            .payer = constraints.payer,
+            .space = constraints.space,
+            .realloc = constraints.realloc,
+            .realloc_payer = constraints.realloc_payer,
+            .realloc_zero = constraints.realloc_zero,
+            .executable = constraints.executable,
+            .rent_exempt = constraints.rent_exempt,
+            .zero = constraints.zero,
+            .bump = constraints.bump,
+            .token_mint = constraints.token_mint,
+            .token_authority = constraints.token_authority,
+            .mint_authority = constraints.mint_authority,
+            .mint_decimals = constraints.mint_decimals,
+        };
+
+        /// Load account data as read-only (zero-copy)
+        ///
+        /// Returns a pointer to the data after the 8-byte discriminator.
+        /// No data is copied - this is a direct pointer into account memory.
+        pub fn load(self: Self) *const DataType {
+            return @ptrCast(@alignCast(self.data_ptr));
+        }
+
+        /// Load account data as mutable (zero-copy)
+        ///
+        /// Returns a mutable pointer to the data after the 8-byte discriminator.
+        /// Changes are written directly to account memory.
+        pub fn loadMut(self: Self) *DataType {
+            return @ptrCast(@alignCast(self.data_ptr));
+        }
+
+        /// Load for initialization (zero-copy)
+        ///
+        /// Same as loadMut(), but semantically indicates this is for first-time init.
+        /// Caller should ensure account is zeroed before use.
+        pub fn loadInit(self: Self) *DataType {
+            return self.loadMut();
+        }
+
+        /// Get the discriminator bytes
+        pub fn discriminator(self: Self) *const [8]u8 {
+            // Discriminator is 8 bytes before data_ptr
+            return @ptrCast(self.data_ptr - 8);
+        }
+
+        /// Get mutable discriminator bytes
+        pub fn discriminatorMut(self: Self) *[8]u8 {
+            return @ptrCast(self.data_ptr - 8);
+        }
+
+        /// Get account public key
+        pub fn key(self: Self) PublicKey {
+            return self.account_info.id();
+        }
+
+        /// Get account lamports
+        pub fn lamports(self: Self) *u64 {
+            return self.account_info.lamports();
+        }
+
+        /// Get account owner
+        pub fn owner(self: Self) PublicKey {
+            return self.account_info.ownerId();
+        }
+
+        /// Get raw data slice (includes discriminator)
+        pub fn dataSlice(self: Self) []const u8 {
+            return (self.data_ptr - 8)[0..self.data_len];
+        }
+
+        /// Get raw mutable data slice (includes discriminator)  
+        pub fn dataSliceMut(self: Self) []u8 {
+            return @constCast((self.data_ptr - 8)[0..self.data_len]);
+        }
+
+        /// Get account info for CPI
+        pub fn info(self: Self) SdkAccount.Info {
+            return self.account_info.info();
+        }
+
+        /// Check if account is a signer
+        pub fn isSigner(self: Self) bool {
+            return self.account_info.isSigner();
+        }
+
+        /// Check if account is writable
+        pub fn isWritable(self: Self) bool {
+            return self.account_info.isWritable();
+        }
+    };
+}
+
+/// AccountLoader with mutable access (convenience alias)
+pub fn AccountLoaderMut(comptime DataType: type, comptime constraints: AccountConstraints) type {
+    var c = constraints;
+    c.writable = true;
+    return AccountLoader(DataType, c);
+}
+
 // Aliases for compatibility
 pub const ZeroSigner = Signer;
 pub const ZeroMut = Mut;
@@ -460,6 +620,26 @@ pub fn ZeroAccountTyped(
 
         pub inline fn verifyWritable(self: Self) !void {
             if (!self.isWritable()) return error.ConstraintMut;
+        }
+
+        // AccountLoader-style aliases for zero-copy access
+        
+        /// Load account data as read-only (zero-copy)
+        /// Alias for get() - compatible with AccountLoader API
+        pub inline fn load(self: Self) if (DataType != void) *const DataType else noreturn {
+            return self.get();
+        }
+
+        /// Load account data as mutable (zero-copy)
+        /// Alias for getMut() - compatible with AccountLoader API
+        pub inline fn loadMut(self: Self) if (DataType != void) *DataType else noreturn {
+            return self.getMut();
+        }
+
+        /// Load for initialization (zero-copy)
+        /// Same as loadMut(), semantically indicates first-time init
+        pub inline fn loadInit(self: Self) if (DataType != void) *DataType else noreturn {
+            return self.getMut();
         }
     };
 }
