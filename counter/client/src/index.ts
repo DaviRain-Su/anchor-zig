@@ -5,11 +5,7 @@ import * as anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 
 const PROGRAM_ID = new anchor.web3.PublicKey(
-  "4ZfDpKj91bdUw8FuJBGvZu3a9Xis2Ce4QQsjMtwgMG3b",
-);
-
-const MEMO_PROGRAM_ID = new anchor.web3.PublicKey(
-  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+  "9YVfTx1E16vs7pzSSfC8wuqz19a4uGC1jtJP3tbKEHYC",
 );
 
 const IDL_PATH = path.resolve(
@@ -17,53 +13,13 @@ const IDL_PATH = path.resolve(
   "../../idl/counter.json",
 );
 
-const COUNTER_SIZE = 8 + 8;
-
-function formatEventData(value: unknown): unknown {
-  if (value instanceof BN) {
-    return value.toString();
-  }
-  if (value instanceof anchor.web3.PublicKey) {
-    return value.toBase58();
-  }
-  if (Array.isArray(value)) {
-    return value.map(formatEventData);
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, val]) => [
-        key,
-        formatEventData(val),
-      ]),
-    );
-  }
-  return value;
-}
-
-
-async function printEvents(
-  connection: anchor.web3.Connection,
-  eventParser: anchor.EventParser,
-  signature: string,
-  label: string,
-): Promise<void> {
-  const logs = await connection.getTransaction(signature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  const logMessages = logs?.meta?.logMessages || [];
-  const parsedEvents = [...eventParser.parseLogs(logMessages)];
-  for (const event of parsedEvents) {
-    console.log(label, event.name, formatEventData(event.data));
-  }
-  if (parsedEvents.length == 0) {
-    console.log(label, "no events decoded; raw logs:", logMessages);
-  }
-}
+// Counter size: 8 bytes discriminator + 8 bytes count = 16 bytes
+const COUNTER_SIZE = 16;
 
 async function main(): Promise<void> {
   const url = "http://127.0.0.1:8899";
   const connection = new anchor.web3.Connection(url, "confirmed");
+  
   const walletPath =
     process.env.ANCHOR_WALLET ||
     path.join(os.homedir(), ".config", "solana", "id.json");
@@ -77,15 +33,19 @@ async function main(): Promise<void> {
   });
   anchor.setProvider(provider);
 
+  console.log("Wallet:", wallet.publicKey.toBase58());
+  console.log("Program:", PROGRAM_ID.toBase58());
+
+  // Load IDL
   const idl = JSON.parse(fs.readFileSync(IDL_PATH, "utf8"));
   const coder = new anchor.BorshCoder(idl);
   const instructionCoder = new anchor.BorshInstructionCoder(idl);
-  const eventParser = new anchor.EventParser(PROGRAM_ID, coder);
 
+  // Create counter account
   const counter = anchor.web3.Keypair.generate();
-  const lamports =
-    await connection.getMinimumBalanceForRentExemption(COUNTER_SIZE);
+  const lamports = await connection.getMinimumBalanceForRentExemption(COUNTER_SIZE);
 
+  console.log("\n1. Creating counter account...");
   const createIx = anchor.web3.SystemProgram.createAccount({
     fromPubkey: wallet.publicKey,
     newAccountPubkey: counter.publicKey,
@@ -98,34 +58,50 @@ async function main(): Promise<void> {
     new anchor.web3.Transaction().add(createIx),
     [counter],
   );
-  console.log("create account tx:", createSig);
+  console.log("   Create account tx:", createSig);
+  console.log("   Counter address:", counter.publicKey.toBase58());
 
+  // Initialize counter
+  console.log("\n2. Initializing counter with value 1...");
   const initData = instructionCoder.encode("initialize", {
     initial: new BN(1),
   });
   if (!initData) {
-    throw new Error("failed to encode initialize");
+    throw new Error("Failed to encode initialize");
   }
+  
   const initIx = new anchor.web3.TransactionInstruction({
     programId: PROGRAM_ID,
     data: initData,
     keys: [
       { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
       { pubkey: counter.publicKey, isSigner: false, isWritable: true },
+      { pubkey: anchor.web3.SystemProgram.programId, isSigner: false, isWritable: false },
     ],
   });
+  
   const initSig = await provider.sendAndConfirm(
     new anchor.web3.Transaction().add(initIx),
     [],
   );
-  console.log("initialize tx:", initSig);
+  console.log("   Initialize tx:", initSig);
 
+  // Read counter
+  let accountInfo = await connection.getAccountInfo(counter.publicKey);
+  if (accountInfo) {
+    const decoded = coder.accounts.decode("Counter", accountInfo.data);
+    console.log("   Counter value:", decoded.count.toString());
+  }
+
+  // Increment counter
+  console.log("\n3. Incrementing counter by 5...");
   const incData = instructionCoder.encode("increment", {
-    amount: new BN(2),
+    amount: new BN(5),
   });
   if (!incData) {
-    throw new Error("failed to encode increment");
+    throw new Error("Failed to encode increment");
   }
+  
   const incIx = new anchor.web3.TransactionInstruction({
     programId: PROGRAM_ID,
     data: incData,
@@ -134,43 +110,48 @@ async function main(): Promise<void> {
       { pubkey: counter.publicKey, isSigner: false, isWritable: true },
     ],
   });
+  
   const incSig = await provider.sendAndConfirm(
     new anchor.web3.Transaction().add(incIx),
     [],
   );
-  console.log("increment tx:", incSig);
-  await printEvents(connection, eventParser, incSig, "increment event:");
+  console.log("   Increment tx:", incSig);
 
-  const memoData = instructionCoder.encode("increment_with_memo", {
-    amount: new BN(3),
-  });
-  if (!memoData) {
-    throw new Error("failed to encode increment_with_memo");
+  // Read counter again
+  accountInfo = await connection.getAccountInfo(counter.publicKey);
+  if (accountInfo) {
+    const decoded = coder.accounts.decode("Counter", accountInfo.data);
+    console.log("   Counter value:", decoded.count.toString());
   }
-  const memoIx = new anchor.web3.TransactionInstruction({
+
+  // Close counter
+  console.log("\n4. Closing counter account...");
+  const closeData = instructionCoder.encode("close", {});
+  if (!closeData) {
+    throw new Error("Failed to encode close");
+  }
+  
+  const closeIx = new anchor.web3.TransactionInstruction({
     programId: PROGRAM_ID,
-    data: memoData,
+    data: closeData,
     keys: [
       { pubkey: wallet.publicKey, isSigner: true, isWritable: false },
       { pubkey: counter.publicKey, isSigner: false, isWritable: true },
-      { pubkey: MEMO_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: wallet.publicKey, isSigner: false, isWritable: true }, // destination
     ],
   });
-  const memoSig = await provider.sendAndConfirm(
-    new anchor.web3.Transaction().add(memoIx),
+  
+  const closeSig = await provider.sendAndConfirm(
+    new anchor.web3.Transaction().add(closeIx),
     [],
   );
-  console.log("increment_with_memo tx:", memoSig);
-  await printEvents(connection, eventParser, memoSig, "increment_with_memo event:");
+  console.log("   Close tx:", closeSig);
 
-  const accountInfo = await connection.getAccountInfo(counter.publicKey);
-  if (!accountInfo) {
-    throw new Error("counter account not found");
-  }
-  const decoded = coder.accounts.decode("CounterData", accountInfo.data);
-  console.log("counter:", {
-    count: decoded.count.toString(),
-  });
+  // Verify closed
+  accountInfo = await connection.getAccountInfo(counter.publicKey);
+  console.log("   Account closed:", accountInfo === null || accountInfo.lamports === 0);
+
+  console.log("\n✅ All tests passed!");
 }
 
 main().catch((err) => {

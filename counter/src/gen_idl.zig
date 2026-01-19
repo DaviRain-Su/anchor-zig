@@ -11,8 +11,8 @@ const anchor = @import("sol_anchor_zig");
 const idl = anchor.idl_zero;
 
 // Import program definition
-const main = @import("main.zig");
-const Program = main.Program;
+const program_main = @import("main.zig");
+const Program = program_main.Program;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -37,6 +37,10 @@ pub fn main() !void {
     // Generate and write IDL
     try idl.writeJsonFile(allocator, Program, output_path);
 
-    const stdout = std.io.getStdOut().writer();
+    // Print success message
+    var stdout_buffer: [256]u8 = undefined;
+    var stdout_impl = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout: *std.Io.Writer = &stdout_impl.interface;
     try stdout.print("✅ Generated IDL: {s}\n", .{output_path});
+    try stdout.flush();
 }

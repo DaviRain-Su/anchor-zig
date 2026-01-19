@@ -15,7 +15,7 @@
 //! ```bash
 //! cd counter
 //! ./gen_idl.sh
-//! # Output: target/idl/counter.json
+//! # Output: idl/counter.json
 //! ```
 
 const std = @import("std");
@@ -28,17 +28,20 @@ const sol = anchor.sdk;
 // Program Configuration
 // ============================================================================
 
-pub const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("4ZfDpKj91bdUw8FuJBGvZu3a9Xis2Ce4QQsjMtwgMG3b");
+pub const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("9YVfTx1E16vs7pzSSfC8wuqz19a4uGC1jtJP3tbKEHYC");
 
 // ============================================================================
 // Account Data Structures
 // ============================================================================
 
 /// Counter account data (8 bytes)
-pub const CounterData = struct {
+pub const CounterData = extern struct {
     /// Current count value
     count: u64,
 };
+
+// Counter data size (8 bytes discriminator + 8 bytes count)
+const COUNTER_SIZE = 8 + @sizeOf(CounterData);
 
 // ============================================================================
 // Instruction Accounts
@@ -48,20 +51,18 @@ pub const CounterData = struct {
 pub const InitializeAccounts = struct {
     /// Payer for account creation (must be signer, writable)
     payer: zero.Signer(0),
-    /// Counter account to initialize (writable, will hold CounterData)
-    counter: zero.Mut(CounterData),
+    /// Counter account to initialize (writable)
+    counter: zero.Mut(COUNTER_SIZE),
     /// System program for account creation
     system_program: zero.Readonly(0),
 };
 
-/// Accounts for increment instruction
+/// Accounts for increment instruction  
 pub const IncrementAccounts = struct {
     /// Authority who can increment (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to modify (writable, validated owner)
-    counter: zero.Account(CounterData, .{
-        .owner = PROGRAM_ID,
-    }),
+    /// Counter account to modify (writable)
+    counter: zero.Mut(COUNTER_SIZE),
 };
 
 /// Accounts for close instruction
@@ -69,9 +70,7 @@ pub const CloseAccounts = struct {
     /// Authority who can close (must be signer)
     authority: zero.Signer(0),
     /// Counter account to close
-    counter: zero.Account(CounterData, .{
-        .owner = PROGRAM_ID,
-    }),
+    counter: zero.Mut(COUNTER_SIZE),
     /// Destination for remaining lamports
     destination: zero.Mut(0),
 };
@@ -81,13 +80,13 @@ pub const CloseAccounts = struct {
 // ============================================================================
 
 /// Arguments for initialize instruction
-pub const InitializeArgs = struct {
+pub const InitializeArgs = extern struct {
     /// Initial count value
     initial: u64,
 };
 
 /// Arguments for increment instruction
-pub const IncrementArgs = struct {
+pub const IncrementArgs = extern struct {
     /// Amount to increment by
     amount: u64,
 };
@@ -143,33 +142,59 @@ pub const Program = struct {
 // ============================================================================
 
 /// Initialize a new counter account
-pub fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
+fn initialize(ctx: *zero.ProgramContext(InitializeAccounts)) !void {
     const args = ctx.args(InitializeArgs);
+    const accs = ctx.accounts();
     
-    // Write discriminator (first 8 bytes)
-    zero.writeDiscriminator(ctx.accounts.counter, "Counter");
-
-    // Initialize data
-    ctx.accounts.counter.getMut().count = args.initial;
+    // Get counter data pointer (skip 8-byte discriminator)
+    const counter_data = accs.counter.dataSlice();
+    if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
+    
+    // Write discriminator
+    const disc = anchor.discriminator.accountDiscriminator("Counter");
+    const disc_ptr: *[8]u8 = @ptrCast(@constCast(counter_data.ptr));
+    @memcpy(disc_ptr, &disc);
+    
+    // Write initial count
+    const count_ptr: *align(1) u64 = @ptrCast(@constCast(counter_data.ptr + 8));
+    count_ptr.* = args.initial;
 }
 
 /// Increment the counter
-pub fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
+fn increment(ctx: *zero.ProgramContext(IncrementAccounts)) !void {
     const args = ctx.args(IncrementArgs);
-    const data = ctx.accounts.counter.getMut();
-
+    const accs = ctx.accounts();
+    
+    // Get counter data
+    const counter_data = accs.counter.dataSlice();
+    if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
+    
+    // Read current count
+    const count_ptr: *align(1) u64 = @ptrCast(@constCast(counter_data.ptr + 8));
+    
     // Check for overflow
-    const new_count = @addWithOverflow(data.count, args.amount);
+    const new_count = @addWithOverflow(count_ptr.*, args.amount);
     if (new_count[1] != 0) {
         return error.CounterOverflow;
     }
 
-    data.count = new_count[0];
+    count_ptr.* = new_count[0];
 }
 
 /// Close the counter account
-pub fn close(ctx: zero.Ctx(CloseAccounts)) !void {
-    try zero.closeAccount(ctx.accounts.counter, ctx.accounts.destination);
+fn close(ctx: *zero.ProgramContext(CloseAccounts)) !void {
+    const accs = ctx.accounts();
+    
+    // Transfer lamports to destination
+    const counter_lamports = accs.counter.lamports();
+    const dest_lamports = accs.destination.lamports();
+    
+    dest_lamports.* += counter_lamports.*;
+    counter_lamports.* = 0;
+    
+    // Zero out counter data and assign to system program
+    const counter_data = accs.counter.dataSlice();
+    @memset(@constCast(counter_data), 0);
 }
 
 // ============================================================================
