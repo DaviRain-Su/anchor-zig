@@ -1,0 +1,18 @@
+.{
+    .name = .transfer_anchor_opt,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0xa7fc97274a249a6a,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .url = "https://github.com/DaviRain-Su/solana-program-sdk-zig/archive/refs/heads/dev.tar.gz",
+            .hash = "solana_program_sdk-0.17.1-wGj9UNYVHAD_uLlbUOhOAMLL08lQOXMm3Ss3Xw4VYvkt",
+        },
+        .sol_anchor_zig = .{ .path = "../../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
