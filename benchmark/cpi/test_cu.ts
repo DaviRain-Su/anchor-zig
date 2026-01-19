@@ -110,6 +110,11 @@ async function main() {
       path: "zero-cu/zig-out/lib/cpi_zero_cu.so",
       useDisc: true,
     },
+    {
+      name: "program()",
+      path: "zero-cu-anchor/zig-out/lib/cpi_anchor.so",
+      useDisc: true,
+    },
   ];
 
   console.log("╔══════════════════════════════════════════════════════════════╗");

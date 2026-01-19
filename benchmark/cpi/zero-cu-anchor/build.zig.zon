@@ -1,0 +1,19 @@
+.{
+    .name = .cpi_anchor,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0xe55386c0e265b523,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .path = "../../../../solana-program-sdk-zig",
+        },
+        .sol_anchor_zig = .{
+            .path = "../../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

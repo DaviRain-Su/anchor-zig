@@ -306,7 +306,7 @@ pub fn instructionDataOffset(comptime account_data_lens: []const usize) usize {
 pub fn accountDataLengths(comptime Accounts: type) []const usize {
     const fields = std.meta.fields(Accounts);
     comptime var lens: [fields.len]usize = undefined;
-    inline for (fields, 0..) |field, i| {
+    for (fields, 0..) |field, i| {
         lens[i] = field.type.data_size;
     }
     const result = lens;
@@ -420,7 +420,35 @@ pub fn ZeroAccountTyped(
 // Instruction Context with Auto-Validation
 // ============================================================================
 
+/// Check if an Accounts struct needs CPI (has program accounts with unknown data size)
+fn needsDynamicParsing(comptime Accounts: type) bool {
+    const fields = std.meta.fields(Accounts);
+    for (fields) |field| {
+        // Check if field name contains "program" (e.g., system_program, token_program)
+        if (std.mem.indexOf(u8, field.name, "program") != null) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Context type for program() handlers
+/// 
+/// Automatically chooses between static (fast) and dynamic (CPI-compatible)
+/// context based on whether the accounts include program references.
 pub fn Ctx(comptime Accounts: type) type {
+    if (comptime needsDynamicParsing(Accounts)) {
+        return ProgramContext(Accounts);
+    } else {
+        return ZeroInstructionContext(Accounts);
+    }
+}
+
+/// Legacy context type using static offset calculation
+///
+/// Only use this with entry()/multi() which require compile-time
+/// known account data sizes. For program(), use Ctx() instead.
+pub fn StaticCtx(comptime Accounts: type) type {
     return ZeroInstructionContext(Accounts);
 }
 
@@ -430,7 +458,7 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
 
     const AccountsAccessor = blk: {
         var acc_fields: [fields.len]std.builtin.Type.StructField = undefined;
-        inline for (fields, 0..) |field, i| {
+        for (fields, 0..) |field, i| {
             const field_constraints = if (@hasDecl(field.type, "CONSTRAINTS"))
                 field.type.CONSTRAINTS
             else
@@ -575,7 +603,8 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
                     }
 
                     const program_id = self.programId();
-                    const derived = sol.PublicKey.findProgramAddress(
+                    // Use public_key module's findProgramAddressSlice which uses syscall on-chain
+                    const derived = sol.public_key.findProgramAddressSlice(
                         seed_slices[0..seed_count],
                         program_id.*,
                     ) catch return error.ConstraintSeeds;
@@ -761,42 +790,90 @@ pub fn ixValidated(
     };
 }
 
-/// Export program with multiple instructions, each with its own account layout
+/// Check if any handler needs dynamic parsing
+fn anyHandlerNeedsDynamic(comptime handlers: anytype) bool {
+    inline for (handlers) |H| {
+        if (needsDynamicParsing(H.AccountsType)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Export program with multiple instructions
 ///
-/// This is the most flexible entry point, supporting different account
-/// structures for each instruction.
+/// Automatically chooses between static offset calculation (faster) and
+/// dynamic context loading (required for CPI) based on account types.
+///
+/// - If accounts include program references (e.g., system_program), uses dynamic parsing
+/// - Otherwise, uses fast static offset calculation
 ///
 /// Usage:
 /// ```zig
 /// comptime {
 ///     zero.program(.{
-///         zero.handler("initialize", InitAccounts, initialize),
-///         zero.handler("increment", IncrementAccounts, increment),
+///         zero.ix("initialize", InitAccounts, initialize),
+///         zero.ix("increment", IncrementAccounts, increment),
 ///     });
 /// }
 /// ```
 pub fn program(comptime handlers: anytype) void {
+    const use_dynamic = comptime anyHandlerNeedsDynamic(handlers);
+
     const S = struct {
         fn entrypoint(input: [*]u8) callconv(.c) u64 {
-            // Read number of accounts from input (first u64)
+            if (use_dynamic) {
+                // Dynamic path: use Context.load() for CPI scenarios
+                return dynamicEntrypoint(input, handlers);
+            } else {
+                // Static path: use precomputed offsets for speed
+                return staticEntrypoint(input, handlers);
+            }
+        }
+
+        fn dynamicEntrypoint(input: [*]u8, comptime hs: anytype) u64 {
+            const context = sol.context.Context.load(input) catch return 1;
+
+            if (context.data.len < 8) return 1;
+
+            const disc: *align(1) const u64 = @ptrCast(context.data.ptr);
+
+            inline for (hs) |H| {
+                if (disc.* == H.discriminator) {
+                    var ctx = ProgramContext(H.AccountsType).init(context);
+
+                    if (H.auto_validate) {
+                        ctx.validate() catch return 1;
+                    }
+
+                    if (H.handlerFn(&ctx)) |_| {
+                        return 0;
+                    } else |_| {
+                        return 1;
+                    }
+                }
+            }
+            return 1;
+        }
+
+        fn staticEntrypoint(input: [*]u8, comptime hs: anytype) u64 {
+            // Read number of accounts
             const num_accounts: *const u64 = @ptrCast(@alignCast(input));
-            
-            // Find matching handler based on number of accounts
-            inline for (handlers) |H| {
+
+            inline for (hs) |H| {
                 const expected_accounts = std.meta.fields(H.AccountsType).len;
-                
-                // Only check discriminator if account count matches
+
                 if (num_accounts.* == expected_accounts) {
                     const CtxType = ZeroInstructionContext(H.AccountsType);
                     const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
-                    
+
                     if (disc_ptr.* == H.discriminator) {
                         const ctx = CtxType.load(input);
-                        
+
                         if (H.auto_validate) {
                             ctx.validate() catch return 1;
                         }
-                        
+
                         if (H.handlerFn(ctx)) |_| {
                             return 0;
                         } else |_| {
@@ -805,24 +882,22 @@ pub fn program(comptime handlers: anytype) void {
                     }
                 }
             }
-            
-            // If no exact match found, try all handlers (for different data sizes)
-            // This handles cases where same account count but different discriminators
-            inline for (handlers) |H| {
+
+            // Fallback: try all handlers
+            inline for (hs) |H| {
                 const CtxType = ZeroInstructionContext(H.AccountsType);
                 const expected_accounts = std.meta.fields(H.AccountsType).len;
-                
-                // Safety check: only read discriminator if we have enough accounts
+
                 if (num_accounts.* >= expected_accounts) {
                     const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
-                    
+
                     if (disc_ptr.* == H.discriminator) {
                         const ctx = CtxType.load(input);
-                        
+
                         if (H.auto_validate) {
                             ctx.validate() catch return 1;
                         }
-                        
+
                         if (H.handlerFn(ctx)) |_| {
                             return 0;
                         } else |_| {
@@ -831,13 +906,184 @@ pub fn program(comptime handlers: anytype) void {
                     }
                 }
             }
-            
-            return 1; // No matching instruction
+
+            return 1;
         }
     };
 
     @export(&S.entrypoint, .{ .name = "entrypoint" });
 }
+
+/// Program context - wraps sol.context.Context for dynamic account parsing
+///
+/// This is the context type passed to instruction handlers when using program().
+/// It provides access to accounts, instruction arguments, and program ID.
+pub fn ProgramContext(comptime Accounts: type) type {
+    const fields = std.meta.fields(Accounts);
+
+    return struct {
+        context: sol.context.Context,
+
+        const Self = @This();
+        pub const AccountsType = Accounts;
+
+        // Generate accounts accessor type with self reference
+        pub const AccountsAccessor = blk: {
+            var acc_fields: [fields.len]std.builtin.Type.StructField = undefined;
+            for (fields, 0..) |field, i| {
+                const RefType = struct {
+                    ctx: *const Self,
+
+                    pub fn id(ref: @This()) *const PublicKey {
+                        return &ref.ctx.context.accounts[i].ptr.id;
+                    }
+
+                    pub fn lamports(ref: @This()) *u64 {
+                        return ref.ctx.context.accounts[i].lamports();
+                    }
+
+                    pub fn info(ref: @This()) sol.account.Account.Info {
+                        return ref.ctx.context.accounts[i].info();
+                    }
+
+                    pub fn dataSlice(ref: @This()) []const u8 {
+                        return ref.ctx.context.accounts[i].dataSlice();
+                    }
+
+                    pub fn isSigner(ref: @This()) bool {
+                        return ref.ctx.context.accounts[i].isSigner();
+                    }
+
+                    pub fn isWritable(ref: @This()) bool {
+                        return ref.ctx.context.accounts[i].isWritable();
+                    }
+
+                    pub fn ownerId(ref: @This()) *const PublicKey {
+                        return &ref.ctx.context.accounts[i].ptr.owner_id;
+                    }
+
+                    pub fn isExecutable(ref: @This()) bool {
+                        return ref.ctx.context.accounts[i].isExecutable();
+                    }
+                };
+                acc_fields[i] = .{
+                    .name = field.name,
+                    .type = RefType,
+                    .default_value_ptr = null,
+                    .is_comptime = false,
+                    .alignment = @alignOf(RefType),
+                };
+            }
+            break :blk @Type(.{
+                .@"struct" = .{
+                    .layout = .auto,
+                    .fields = &acc_fields,
+                    .decls = &.{},
+                    .is_tuple = false,
+                },
+            });
+        };
+
+        pub fn init(context: sol.context.Context) Self {
+            return .{ .context = context };
+        }
+
+        pub fn accounts(self: *const Self) AccountsAccessor {
+            var acc: AccountsAccessor = undefined;
+            inline for (fields) |field| {
+                @field(acc, field.name) = .{ .ctx = self };
+            }
+            return acc;
+        }
+
+        pub fn args(self: *const Self, comptime T: type) *const T {
+            return @ptrCast(@alignCast(self.context.data.ptr + 8));
+        }
+
+        pub fn programId(self: *const Self) *const PublicKey {
+            return self.context.program_id;
+        }
+
+        /// Validate all declared constraints on accounts
+        pub fn validate(self: *const Self) !void {
+            const accs = self.accounts();
+            inline for (fields, 0..) |field, i| {
+                // Get account from context
+                const account = self.context.accounts[i];
+
+                // Check constraints from the account type
+                if (@hasDecl(field.type, "CONSTRAINTS")) {
+                    const C = field.type.CONSTRAINTS;
+
+                    // Signer check
+                    if (C.signer) {
+                        if (!account.isSigner()) return error.ConstraintSigner;
+                    }
+
+                    // Writable check  
+                    if (C.writable) {
+                        if (!account.isWritable()) return error.ConstraintMut;
+                    }
+
+                    // Owner check
+                    if (C.owner) |expected_owner| {
+                        if (!account.ownerId().equals(expected_owner)) return error.ConstraintOwner;
+                    }
+
+                    // Address check
+                    if (C.address) |expected_addr| {
+                        if (!account.id().equals(expected_addr)) return error.ConstraintAddress;
+                    }
+                }
+                _ = @field(accs, field.name);
+            }
+        }
+    };
+}
+
+/// Account reference for program() context
+fn AccountRef(comptime index: usize) type {
+    return struct {
+        context_ptr: *const sol.context.Context,
+
+        const Self = @This();
+
+        pub fn id(self: Self) *const PublicKey {
+            return &self.context_ptr.accounts[index].ptr.id;
+        }
+
+        pub fn lamports(self: Self) *u64 {
+            return self.context_ptr.accounts[index].lamports();
+        }
+
+        pub fn info(self: Self) sol.account.Account.Info {
+            return self.context_ptr.accounts[index].info();
+        }
+
+        pub fn dataSlice(self: Self) []const u8 {
+            return self.context_ptr.accounts[index].dataSlice();
+        }
+
+        pub fn isSigner(self: Self) bool {
+            return self.context_ptr.accounts[index].isSigner();
+        }
+
+        pub fn isWritable(self: Self) bool {
+            return self.context_ptr.accounts[index].isWritable();
+        }
+
+        pub fn ownerId(self: Self) *const PublicKey {
+            return &self.context_ptr.accounts[index].ptr.owner_id;
+        }
+
+        pub fn isExecutable(self: Self) bool {
+            return self.context_ptr.accounts[index].isExecutable();
+        }
+    };
+}
+
+/// Backward compatibility alias for ProgramContext
+pub const DynamicContext = ProgramContext;
 
 // ============================================================================
 // Legacy Compatibility
