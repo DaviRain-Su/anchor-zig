@@ -998,6 +998,52 @@ pub fn createPdaAccount(
     ) catch return error.CreateAccountFailed;
 }
 
+/// Allocate space for an account via CPI to system program
+///
+/// This is used for PDA accounts that need to have space allocated.
+/// The account must already have lamports (for rent exemption).
+///
+/// Usage:
+/// ```zig
+/// try zero.allocate(ctx.accounts.pda_account, 42, &.{&.{"seed", &.{bump}}});
+/// ```
+pub fn allocate(account: anytype, space: u64, seeds: []const []const []const u8) !void {
+    const data_slice = account.dataSlice();
+    const account_info = SdkAccount.Info{
+        .id = account.id(),
+        .lamports = account.lamports(),
+        .data_len = data_slice.len,
+        .data = @constCast(data_slice.ptr),
+        .owner_id = account.ownerId(),
+        .is_signer = if (account.isSigner()) 1 else 0,
+        .is_writable = if (account.isWritable()) 1 else 0,
+        .is_executable = if (account.isExecutable()) 1 else 0,
+    };
+
+    // Build allocate instruction data: [8 (index u32 LE), space (u64 LE)]
+    var data: [12]u8 = undefined;
+    // Instruction index: 8 = Allocate
+    data[0] = 8;
+    data[1] = 0;
+    data[2] = 0;
+    data[3] = 0;
+    // space (u64 little-endian)
+    @memcpy(data[4..12], &@as([8]u8, @bitCast(space)));
+
+    const cpi_ix = sol.instruction.Instruction.from(.{
+        .program_id = &sol.system_program.id,
+        .accounts = &[_]SdkAccount.Param{
+            .{ .id = account.id(), .is_writable = true, .is_signer = true },
+        },
+        .data = &data,
+    });
+
+    if (cpi_ix.invokeSigned(&.{account_info}, seeds)) |err| {
+        _ = err;
+        return error.AllocateFailed;
+    }
+}
+
 /// Transfer lamports between accounts
 pub fn transferLamports(from: anytype, to: anytype, amount: u64) !void {
     const from_lamports = from.lamports();
