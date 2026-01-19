@@ -6,11 +6,9 @@
  * - Check if account.id == account.owner
  *
  * Benchmarks:
- * - zig-raw:       Raw Zig baseline (no framework)
- * - zero-cu-single: ZeroCU single instruction
- * - zero-cu-multi:  ZeroCU multi-instruction
- * - fast-single:    anchor.fast single instruction
- * - fast-multi:     anchor.fast multi-instruction
+ * - zig-raw:        Raw Zig baseline (no framework)
+ * - zero-cu-single: zero_cu single instruction
+ * - zero-cu-multi:  zero_cu multi-instruction
  */
 
 import {
@@ -26,6 +24,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
+import { execSync } from "child_process";
 
 const connection = new Connection("http://127.0.0.1:8899", "confirmed");
 
@@ -113,11 +112,14 @@ async function testWithDisc(
   return simResult.value.unitsConsumed || 0;
 }
 
-async function deployProgram(soPath: string): Promise<string> {
-  const { execSync } = await import("child_process");
+function deployProgram(soPath: string): string {
   const result = execSync(`solana program deploy ${soPath} 2>&1`).toString();
   const match = result.match(/Program Id: (\w+)/);
   return match ? match[1] : "";
+}
+
+function getFileSize(filePath: string): number {
+  return fs.statSync(filePath).size;
 }
 
 async function main() {
@@ -131,44 +133,49 @@ async function main() {
   // Deploy all programs
   console.log("║ Deploying programs...                                      ║");
 
-  const zigRawId = await deployProgram("zig-raw/zig-out/lib/pubkey_zig.so");
-  const zeroSingleId = await deployProgram(
-    "zero-cu-single/zig-out/lib/zero_cu_single.so"
-  );
-  const zeroMultiId = await deployProgram(
-    "zero-cu-multi/zig-out/lib/zero_cu_multi.so"
-  );
-  const fastSingleId = await deployProgram(
-    "fast-single/zig-out/lib/fast_single.so"
-  );
-  const fastMultiId = await deployProgram(
-    "fast-multi/zig-out/lib/fast_multi.so"
-  );
+  const zigRawPath = "zig-raw/zig-out/lib/pubkey_zig.so";
+  const zeroSinglePath = "zero-cu-single/zig-out/lib/zero_cu_single.so";
+  const zeroMultiPath = "zero-cu-multi/zig-out/lib/zero_cu_multi.so";
+
+  const zigRawId = deployProgram(zigRawPath);
+  const zeroSingleId = deployProgram(zeroSinglePath);
+  const zeroMultiId = deployProgram(zeroMultiPath);
 
   // Test zig-raw (baseline)
   console.log("║ Testing zig-raw (baseline)...                              ║");
   const zigRawCu = await testRawZig(zigRawId);
-  results.push({ name: "zig-raw (baseline)", cu: zigRawCu, size: 1240 });
+  results.push({
+    name: "zig-raw (baseline)",
+    cu: zigRawCu,
+    size: getFileSize(zigRawPath),
+  });
 
   // Test zero-cu-single
   console.log("║ Testing zero-cu-single...                                  ║");
   const zeroSingleCu = await testWithDisc(zeroSingleId, "check");
-  results.push({ name: "zero-cu-single", cu: zeroSingleCu, size: 1280 });
+  results.push({
+    name: "zero-cu-single",
+    cu: zeroSingleCu,
+    size: getFileSize(zeroSinglePath),
+  });
 
-  // Test zero-cu-multi
-  console.log("║ Testing zero-cu-multi...                                   ║");
-  const zeroMultiCu = await testWithDisc(zeroMultiId, "check");
-  results.push({ name: "zero-cu-multi", cu: zeroMultiCu, size: 1392 });
+  // Test zero-cu-multi (check)
+  console.log("║ Testing zero-cu-multi (check)...                           ║");
+  const zeroMultiCheckCu = await testWithDisc(zeroMultiId, "check");
+  results.push({
+    name: "zero-cu-multi (check)",
+    cu: zeroMultiCheckCu,
+    size: getFileSize(zeroMultiPath),
+  });
 
-  // Test fast-single
-  console.log("║ Testing fast-single (anchor.fast)...                       ║");
-  const fastSingleCu = await testWithDisc(fastSingleId, "check");
-  results.push({ name: "fast-single", cu: fastSingleCu, size: 1272 });
-
-  // Test fast-multi
-  console.log("║ Testing fast-multi (anchor.fast)...                        ║");
-  const fastMultiCu = await testWithDisc(fastMultiId, "check");
-  results.push({ name: "fast-multi", cu: fastMultiCu, size: 1384 });
+  // Test zero-cu-multi (verify)
+  console.log("║ Testing zero-cu-multi (verify)...                          ║");
+  const zeroMultiVerifyCu = await testWithDisc(zeroMultiId, "verify");
+  results.push({
+    name: "zero-cu-multi (verify)",
+    cu: zeroMultiVerifyCu,
+    size: getFileSize(zeroMultiPath),
+  });
 
   // Print results
   console.log("╠════════════════════════════════════════════════════════════╣");
@@ -200,10 +207,6 @@ async function main() {
     `   • zero-cu-single: ${results[1].cu} CU (${results[1].cu === baseline ? "ZERO overhead!" : `+${results[1].cu - baseline} CU`})`
   );
   console.log(`   • zero-cu-multi: ${results[2].cu} CU (+${results[2].cu - baseline} CU)`);
-  console.log(
-    `   • fast-single: ${results[3].cu} CU (${results[3].cu === baseline ? "ZERO overhead!" : `+${results[3].cu - baseline} CU`})`
-  );
-  console.log(`   • fast-multi: ${results[4].cu} CU (+${results[4].cu - baseline} CU)`);
 
   console.log("\n📝 Reference (solana-program-rosetta):");
   console.log("   • Rust: 14 CU");

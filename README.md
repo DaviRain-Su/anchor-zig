@@ -114,83 +114,83 @@ Notes:
 - `anchor.Interface` provides `invoke` and `invokeSigned` helpers.
 - Use `InterfaceConfig.meta_merge` if you need duplicate `AccountMeta` merging.
 
-## Performance APIs (Low CU)
+## Zero-CU API (5-7 CU) ⭐ Recommended
 
-### anchor.fast API (5-7 CU) ⭐ Recommended
-
-Anchor-style patterns with ZeroCU performance:
+High-level abstractions with zero runtime overhead:
 
 ```zig
 const anchor = @import("sol_anchor_zig");
-const fast = anchor.fast;
+const zero = anchor.zero_cu;
 
 const CounterData = struct {
     count: u64,
 };
 
+// Define accounts with type markers
 const MyAccounts = struct {
-    authority: fast.Signer,              // Transaction signer
-    counter: fast.Account(CounterData),  // Typed account
+    authority: zero.Signer(0),           // Signer, 0 bytes data
+    counter: zero.Mut(CounterData),      // Writable, typed data
 };
 
-pub fn increment(ctx: fast.Context(MyAccounts)) !void {
+pub fn increment(ctx: zero.Ctx(MyAccounts)) !void {
     if (!ctx.accounts.authority.isSigner()) {
         return error.MissingSigner;
     }
-    ctx.accounts.counter.getMut().count += 1;
+    ctx.accounts.counter.getMut().count += 1;  // Direct typed access
 }
 
 // Single instruction (5 CU)
 comptime {
-    fast.exportSingle(MyAccounts, "increment", increment);
+    zero.entry(MyAccounts, "increment", increment);
 }
 
-// Multi-instruction (7 CU)
+// Multi-instruction (7 CU each)
 comptime {
-    fast.exportProgram(MyAccounts, .{
-        fast.instruction("initialize", initialize),
-        fast.instruction("increment", increment),
+    zero.multi(MyAccounts, .{
+        zero.inst("initialize", initialize),
+        zero.inst("increment", increment),
     });
 }
 ```
 
-**Account Types:**
-- `fast.Signer` / `fast.SignerMut` - Transaction signer
-- `fast.Account(T)` / `fast.AccountReadonly(T)` - Typed account
-- `fast.RawAccount(size)` / `fast.RawAccountReadonly(size)` - Raw account
+### Account Type Markers
 
-### zero_cu API (5-7 CU)
+| Type | Description |
+|------|-------------|
+| `zero.Signer(data_size)` | Transaction signer |
+| `zero.Mut(T)` or `zero.Mut(size)` | Writable account |
+| `zero.Readonly(T)` or `zero.Readonly(size)` | Read-only account |
 
-Low-level API with explicit data sizes:
+### Typed Data Access
 
 ```zig
-const zero = anchor.zero_cu;
+// Read typed data
+const count = ctx.accounts.counter.get().count;
 
-const Accounts = struct {
-    authority: zero.Signer(0),      // Signer, 0 bytes data
-    counter: zero.Mut(CounterData), // Writable, typed data
-};
+// Write typed data
+ctx.accounts.counter.getMut().count += 1;
 
-comptime {
-    zero.entry(Accounts, "increment", Program.increment);
-}
+// Access account info
+const pubkey = ctx.accounts.authority.id();
+const owner = ctx.accounts.counter.ownerId();
+const lamports = ctx.accounts.counter.lamports();
 ```
 
 ### CU Comparison
 
-| API           | CU    | Size    | Use Case               |
-|---------------|-------|---------|------------------------|
-| Raw Zig       | 5     | 1.2 KB  | No framework           |
-| **fast**      | **5-7** | 1.3 KB | **Recommended**        |
-| zero_cu       | 5-7   | 1.3 KB  | Low-level control      |
-| Standard      | ~150  | 7+ KB   | Full Anchor features   |
+| Implementation | CU | Size | Notes |
+|----------------|-----|------|-------|
+| Raw Zig | 5 | 1.2 KB | No framework |
+| **zero_cu single** | **5** | 1.3 KB | **Zero overhead!** |
+| **zero_cu multi** | **7** | 1.4 KB | **+2 CU dispatch** |
+| Standard Anchor | ~150 | 7+ KB | Full validation |
 
 ### Reference (solana-program-rosetta)
 
 | Language | CU |
 |----------|-----|
-| Rust     | 14  |
-| Zig      | 15  |
+| Rust | 14 |
+| Zig | 15 |
 | **anchor-zig** | **5** |
 
 **anchor-zig is 3x faster than rosetta!**

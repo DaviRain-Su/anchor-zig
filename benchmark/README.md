@@ -12,8 +12,6 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 | zig-raw (baseline)  | 5   | 1240 B  | baseline   |
 | **zero-cu-single**  | **5** | 1280 B | **ZERO!** |
 | **zero-cu-multi**   | **7** | 1392 B | **+2 CU** |
-| **fast-single**     | **5** | 1272 B | **ZERO!** |
-| **fast-multi**      | **7** | 1384 B | **+2 CU** |
 
 ### Reference (solana-program-rosetta)
 
@@ -24,48 +22,38 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 
 **anchor-zig is 3x faster than rosetta!**
 
-## API Comparison
+## zero_cu API
 
-### anchor.fast (Recommended)
-
-Anchor-style patterns with ZeroCU performance:
-
-```zig
-const fast = anchor.fast;
-
-const Accounts = struct {
-    authority: fast.Signer,
-    counter: fast.Account(CounterData),
-};
-
-pub fn increment(ctx: fast.Context(Accounts)) !void {
-    ctx.accounts.counter.getMut().count += 1;
-}
-
-// Single (5 CU)
-comptime { fast.exportSingle(Accounts, "increment", increment); }
-
-// Multi (7 CU)
-comptime {
-    fast.exportProgram(Accounts, .{
-        fast.instruction("init", init),
-        fast.instruction("increment", increment),
-    });
-}
-```
-
-### zero_cu (Low-level)
-
-Direct offset calculation with explicit sizes:
+The `zero_cu` module provides high-level abstractions with zero runtime overhead.
+All offsets are computed at compile time.
 
 ```zig
+const anchor = @import("sol_anchor_zig");
 const zero = anchor.zero_cu;
 
+// Define accounts with sizes
 const Accounts = struct {
+    authority: zero.Signer(0),
     target: zero.Readonly(1),
 };
 
-comptime { zero.entry(Accounts, "check", Program.check); }
+pub fn check(ctx: zero.Ctx(Accounts)) !void {
+    const target = ctx.accounts.target;
+    if (!target.id().equals(target.ownerId().*)) {
+        return error.InvalidKey;
+    }
+}
+
+// Single instruction (5 CU)
+comptime { zero.entry(Accounts, "check", check); }
+
+// Multi-instruction (7 CU each)
+comptime {
+    zero.multi(Accounts, .{
+        zero.inst("check", check),
+        zero.inst("verify", verify),
+    });
+}
 ```
 
 ## Running Benchmarks
@@ -76,7 +64,7 @@ solana-test-validator
 
 # Build all variants
 cd benchmark/pubkey
-for dir in zig-raw zero-cu-single zero-cu-multi fast-single fast-multi; do
+for dir in zig-raw zero-cu-single zero-cu-multi; do
     (cd $dir && ../../solana-zig/zig build)
 done
 
@@ -92,8 +80,6 @@ benchmark/
 │   ├── zig-raw/              # Raw Zig baseline
 │   ├── zero-cu-single/       # zero_cu single instruction
 │   ├── zero-cu-multi/        # zero_cu multi-instruction
-│   ├── fast-single/          # anchor.fast single
-│   ├── fast-multi/           # anchor.fast multi
 │   └── test_cu.ts            # CU measurement script
 ├── helloworld/               # Hello world logging
 └── transfer-lamports/        # Lamport transfer
