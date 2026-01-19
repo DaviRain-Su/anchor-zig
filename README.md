@@ -114,6 +114,83 @@ Notes:
 - `anchor.Interface` provides `invoke` and `invokeSigned` helpers.
 - Use `InterfaceConfig.meta_merge` if you need duplicate `AccountMeta` merging.
 
+## Performance APIs (Low CU)
+
+### ZeroCU Framework (5-9 CU)
+
+For maximum performance with zero runtime overhead:
+
+```zig
+const anchor = @import("sol_anchor_zig");
+const zero = anchor.zero_cu;
+
+// Define data type
+const CounterData = struct {
+    count: u64,
+};
+
+// Define accounts with typed data
+const ProgramAccounts = struct {
+    authority: zero.Signer(0),           // Signer, no data
+    counter: zero.Mut(CounterData),      // Writable, typed data
+};
+
+pub const Program = struct {
+    pub fn increment(ctx: zero.Ctx(ProgramAccounts)) !void {
+        if (!ctx.accounts.authority.isSigner()) {
+            return error.MissingSigner;
+        }
+        ctx.accounts.counter.getMut().count += 1;  // Direct typed access!
+    }
+};
+
+// Single instruction (5 CU)
+comptime {
+    zero.entry(ProgramAccounts, "increment", Program.increment);
+}
+
+// Multi-instruction (7 CU each)
+comptime {
+    zero.multi(ProgramAccounts, .{
+        zero.inst("initialize", Program.initialize),
+        zero.inst("increment", Program.increment),
+    });
+}
+```
+
+### Optimized Entry (31+ CU)
+
+Standard Anchor API with tiered validation:
+
+```zig
+pub const Program = struct {
+    pub const id = sol.PublicKey.comptimeFromBase58("...");
+    pub const instructions = struct {
+        pub const increment = anchor.Instruction(.{ .Accounts = MyAccounts });
+    };
+    pub fn increment(ctx: anchor.Context(MyAccounts)) !void { ... }
+};
+
+// Choose validation level
+comptime {
+    anchor.optimized.exportEntrypoint(Program, .minimal);
+}
+```
+
+| Level     | Checks                    | CU Overhead |
+|-----------|---------------------------|-------------|
+| full      | All Anchor constraints    | ~150 CU     |
+| minimal   | Discriminator + signer    | ~31 CU      |
+| unchecked | Discriminator only        | ~10 CU      |
+
+### CU Comparison
+
+| API          | CU    | Binary Size | Use Case               |
+|--------------|-------|-------------|------------------------|
+| ZeroCU       | 5-9   | 1.3 KB      | Maximum performance    |
+| Optimized    | 31+   | 1.6 KB      | Anchor compatibility   |
+| Standard     | ~150  | 7+ KB       | Full safety            |
+
 ## Build + Test
 
 ```bash
