@@ -1,0 +1,21 @@
+.{
+    .name = .cpi_zero_cu,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0xd11783f49b40b9e4,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .url = "https://github.com/joncinque/solana-program-sdk-zig/archive/refs/tags/v0.17.1.tar.gz",
+            .hash = "solana_program_sdk-0.17.1-wGj9UBrlAADAagTi3MSX1vSpGg-DePWB_5znbUgMlH1U",
+        },
+        .solana_program_library = .{
+            .url = "https://github.com/joncinque/solana-program-library-zig/archive/refs/tags/v0.16.1.tar.gz",
+            .hash = "solana_program_library-0.16.1-10r-lcr-AACkeemV1ql6olBAHLdID3JPJmGcNsx1gayC",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

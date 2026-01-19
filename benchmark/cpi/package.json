@@ -1,0 +1,7 @@
+{
+  "name": "cpi-benchmark",
+  "type": "module",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0"
+  }
+}
