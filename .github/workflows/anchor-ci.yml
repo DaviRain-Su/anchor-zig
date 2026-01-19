@@ -37,9 +37,5 @@ jobs:
       - name: Install solana-zig
         run: ./install-solana-zig.sh solana-zig
 
-      - name: Clone solana-program-sdk-zig
-        run: |
-          git clone --depth 1 https://github.com/joncinque/solana-program-sdk-zig.git ../solana-program-sdk-zig
-
       - name: Test Anchor
         run: ./solana-zig/zig build test --summary all

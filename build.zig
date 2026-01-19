@@ -1,26 +1,35 @@
 const std = @import("std");
+const solana = @import("solana_program_sdk");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
-    // For the library itself, we use host target for tests
-    // Users building programs will use SBF target from their own build.zig
+    // SBF target for Solana programs
+    const sbf_target = b.resolveTargetQuery(solana.sbf_target);
 
+    // Get dependencies for SBF target
+    const solana_dep = b.dependency("solana_program_sdk", .{
+        .target = sbf_target,
+        .optimize = optimize,
+    });
+    const solana_mod = solana_dep.module("solana_program_sdk");
+
+    // Main anchor module (SBF target for program builds)
+    const anchor_mod = b.addModule("sol_anchor_zig", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = sbf_target,
+        .optimize = optimize,
+    });
+    anchor_mod.addImport("solana_program_sdk", solana_mod);
+
+    // Get dependencies for host target (for IDL generation and testing)
     const solana_host_dep = b.dependency("solana_program_sdk", .{
         .target = b.graph.host,
         .optimize = optimize,
     });
     const solana_host_mod = solana_host_dep.module("solana_program_sdk");
 
-    // Main anchor module (host target for library development/testing)
-    const anchor_mod = b.addModule("sol_anchor_zig", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = b.graph.host,
-        .optimize = optimize,
-    });
-    anchor_mod.addImport("solana_program_sdk", solana_host_mod);
-
-    // Also export a host module explicitly
+    // Host module for IDL generation and testing
     const anchor_host_mod = b.addModule("sol_anchor_zig_host", .{
         .root_source_file = b.path("src/root.zig"),
         .target = b.graph.host,
@@ -64,7 +73,7 @@ pub fn build(b: *std.Build) void {
     const idl_step = b.step("idl", "Generate Anchor IDL JSON");
     idl_step.dependOn(&run_idl.step);
 
-    // Unit tests
+    // Unit tests (host target)
     const lib_unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
