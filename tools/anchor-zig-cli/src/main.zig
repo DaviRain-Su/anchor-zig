@@ -20,8 +20,9 @@
 //! # Generate IDL (in project directory)
 //! anchor-zig idl generate
 //!
-//! # Build program
+//! # Build program (uses SOLANA_ZIG env var or --zig option)
 //! anchor-zig build
+//! anchor-zig build --zig /path/to/solana-zig/zig
 //!
 //! # Test program
 //! anchor-zig test
@@ -29,11 +30,22 @@
 //! # Deploy program
 //! anchor-zig deploy
 //! ```
+//!
+//! ## Environment Variables
+//!
+//! - `SOLANA_ZIG` - Path to solana-zig compiler (default: "zig")
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const VERSION = "0.1.0";
+
+/// Global configuration
+const Config = struct {
+    zig_path: []const u8 = "zig",
+};
+
+var global_config: Config = .{};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -43,33 +55,59 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    // Check for SOLANA_ZIG environment variable
+    const env_map = try std.process.getEnvMap(allocator);
+    if (env_map.get("SOLANA_ZIG")) |zig_path| {
+        global_config.zig_path = zig_path;
+    }
+
     if (args.len < 2) {
         try printUsage();
         return;
     }
 
-    const command = args[1];
+    // Parse global options first
+    var cmd_start: usize = 1;
+    while (cmd_start < args.len) {
+        if (std.mem.eql(u8, args[cmd_start], "--zig")) {
+            cmd_start += 1;
+            if (cmd_start < args.len) {
+                global_config.zig_path = args[cmd_start];
+                cmd_start += 1;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if (cmd_start >= args.len) {
+        try printUsage();
+        return;
+    }
+
+    const command = args[cmd_start];
+    const cmd_args = args[cmd_start + 1 ..];
 
     if (std.mem.eql(u8, command, "-h") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "help")) {
         try printUsage();
     } else if (std.mem.eql(u8, command, "-v") or std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "version")) {
         try printVersion();
     } else if (std.mem.eql(u8, command, "init")) {
-        try cmdInit(allocator, args[2..]);
+        try cmdInit(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "idl")) {
-        try cmdIdl(allocator, args[2..]);
+        try cmdIdl(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "build")) {
-        try cmdBuild(allocator, args[2..]);
+        try cmdBuild(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "test")) {
-        try cmdTest(allocator, args[2..]);
+        try cmdTest(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "deploy")) {
-        try cmdDeploy(allocator, args[2..]);
+        try cmdDeploy(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "verify")) {
-        try cmdVerify(allocator, args[2..]);
+        try cmdVerify(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "keys")) {
-        try cmdKeys(allocator, args[2..]);
+        try cmdKeys(allocator, cmd_args);
     } else if (std.mem.eql(u8, command, "clean")) {
-        try cmdClean(allocator, args[2..]);
+        try cmdClean(allocator, cmd_args);
     } else {
         try printError("Unknown command: {s}", .{command});
         try printUsage();
@@ -83,16 +121,6 @@ pub fn main() !void {
 /// Thread-local stdout buffer
 threadlocal var stdout_buffer: [4096]u8 = undefined;
 threadlocal var stderr_buffer: [4096]u8 = undefined;
-
-fn getStdout() *std.Io.Writer {
-    var impl = std.fs.File.stdout().writer(&stdout_buffer);
-    return &impl.interface;
-}
-
-fn getStderr() *std.Io.Writer {
-    var impl = std.fs.File.stderr().writer(&stderr_buffer);
-    return &impl.interface;
-}
 
 fn printVersion() !void {
     var impl = std.fs.File.stdout().writer(&stdout_buffer);
@@ -123,7 +151,10 @@ fn printUsage() !void {
         \\anchor-zig - Solana development framework for Zig
         \\
         \\USAGE:
-        \\    anchor-zig <COMMAND> [OPTIONS]
+        \\    anchor-zig [--zig <path>] <COMMAND> [OPTIONS]
+        \\
+        \\GLOBAL OPTIONS:
+        \\    --zig <path>      Path to zig compiler (or set SOLANA_ZIG env var)
         \\
         \\COMMANDS:
         \\    init <name>       Create a new anchor-zig project
@@ -141,9 +172,14 @@ fn printUsage() !void {
         \\    -h, --help        Show help for a command
         \\    -v, --version     Show version information
         \\
+        \\ENVIRONMENT:
+        \\    SOLANA_ZIG        Path to solana-zig compiler (for SBF target support)
+        \\
         \\EXAMPLES:
         \\    anchor-zig init my_program
         \\    anchor-zig build
+        \\    anchor-zig --zig ./solana-zig/zig build
+        \\    SOLANA_ZIG=./solana-zig/zig anchor-zig build
         \\    anchor-zig test
         \\    anchor-zig deploy --network devnet
         \\    anchor-zig idl generate -o idl/program.json
@@ -529,17 +565,19 @@ fn getReadmeTemplate() []const u8 {
         \\
         \\## Prerequisites
         \\
-        \\- Zig 0.15.x
+        \\- Zig 0.15.x (or solana-zig for SBF target)
         \\- Solana CLI tools
         \\- anchor-zig and solana-program-sdk-zig
         \\
         \\## Build
         \\
         \\```bash
-        \\# Build the program
-        \\zig build
+        \\# Build the program (requires solana-zig for SBF target)
+        \\SOLANA_ZIG=/path/to/solana-zig/zig anchor-zig build
+        \\# Or directly:
+        \\/path/to/solana-zig/zig build
         \\
-        \\# Generate IDL
+        \\# Generate IDL (can use standard zig)
         \\zig build idl
         \\
         \\# Run tests
@@ -550,10 +588,10 @@ fn getReadmeTemplate() []const u8 {
         \\
         \\```bash
         \\# Deploy to devnet
-        \\solana program deploy zig-out/bin/program.so --url devnet
+        \\solana program deploy zig-out/lib/program.so --url devnet
         \\
         \\# Deploy to mainnet
-        \\solana program deploy zig-out/bin/program.so --url mainnet-beta
+        \\solana program deploy zig-out/lib/program.so --url mainnet-beta
         \\```
         \\
         \\## Project Structure
@@ -721,7 +759,7 @@ fn cmdIdlGenerate(args: []const []const u8) !void {
     var argv_buf: [16][]const u8 = undefined;
     var argc: usize = 0;
 
-    argv_buf[argc] = "zig";
+    argv_buf[argc] = global_config.zig_path;
     argc += 1;
     argv_buf[argc] = "build";
     argc += 1;
@@ -741,7 +779,19 @@ fn cmdIdlGenerate(args: []const []const u8) !void {
     child.stderr_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
 
-    _ = try child.spawnAndWait();
+    const result = try child.spawnAndWait();
+    switch (result) {
+        .Exited => |code| {
+            if (code == 0) {
+                try printInfo("✅ IDL generation complete", .{});
+            } else {
+                try printError("IDL generation failed with exit code: {d}", .{code});
+            }
+        },
+        else => {
+            try printError("IDL generation process terminated abnormally", .{});
+        },
+    }
 }
 
 fn printIdlGenerateHelp() !void {
@@ -825,12 +875,13 @@ fn cmdBuild(allocator: Allocator, args: []const []const u8) !void {
     }
 
     try printInfo("Building program...", .{});
+    try printInfo("  Using zig: {s}", .{global_config.zig_path});
 
     // Run zig build
     var argv_buf: [8][]const u8 = undefined;
     var argc: usize = 0;
 
-    argv_buf[argc] = "zig";
+    argv_buf[argc] = global_config.zig_path;
     argc += 1;
     argv_buf[argc] = "build";
     argc += 1;
@@ -849,7 +900,7 @@ fn cmdBuild(allocator: Allocator, args: []const []const u8) !void {
         .Exited => |code| {
             if (code == 0) {
                 try printInfo("✅ Build complete", .{});
-                try printInfo("Output: zig-out/bin/program.so", .{});
+                try printInfo("Output: zig-out/lib/*.so", .{});
             } else {
                 try printError("Build failed with exit code: {d}", .{code});
             }
@@ -868,13 +919,23 @@ fn printBuildHelp() !void {
         \\anchor-zig build - Build the Solana program
         \\
         \\USAGE:
-        \\    anchor-zig build [OPTIONS]
+        \\    anchor-zig [--zig <path>] build [OPTIONS]
         \\
         \\OPTIONS:
         \\    -r, --release     Build with release optimizations
         \\    -h, --help        Show this help message
         \\
-        \\This command runs 'zig build' in the current directory.
+        \\ENVIRONMENT:
+        \\    SOLANA_ZIG        Path to solana-zig compiler
+        \\
+        \\EXAMPLES:
+        \\    anchor-zig build
+        \\    anchor-zig --zig ./solana-zig/zig build
+        \\    SOLANA_ZIG=./solana-zig/zig anchor-zig build
+        \\
+        \\NOTE:
+        \\    Building for SBF target requires solana-zig compiler.
+        \\    Set SOLANA_ZIG environment variable or use --zig option.
         \\
     , .{});
     try out.flush();
@@ -895,9 +956,10 @@ fn cmdTest(allocator: Allocator, args: []const []const u8) !void {
     }
 
     try printInfo("Running tests...", .{});
+    try printInfo("  Using zig: {s}", .{global_config.zig_path});
 
     // Run zig build test
-    const argv = [_][]const u8{ "zig", "build", "test" };
+    const argv = [_][]const u8{ global_config.zig_path, "build", "test" };
     var child = std.process.Child.init(&argv, std.heap.page_allocator);
     child.stderr_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
@@ -945,7 +1007,7 @@ fn cmdDeploy(allocator: Allocator, args: []const []const u8) !void {
 
     var network: []const u8 = "localnet";
     var keypair_path: ?[]const u8 = null;
-    var program_path: []const u8 = "zig-out/bin/program.so";
+    var program_path: []const u8 = "zig-out/lib/program.so";
 
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -1052,7 +1114,7 @@ fn printDeployHelp() !void {
         \\OPTIONS:
         \\    -n, --network <name>     Network to deploy to (localnet, devnet, testnet, mainnet)
         \\    -k, --keypair <path>     Path to keypair file
-        \\    -p, --program <path>     Path to program .so file
+        \\    -p, --program <path>     Path to program .so file (default: zig-out/lib/program.so)
         \\    -h, --help               Show this help message
         \\
         \\NETWORKS:

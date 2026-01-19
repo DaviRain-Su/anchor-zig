@@ -21,6 +21,18 @@ zig build -Doptimize=ReleaseFast
 export PATH="$PATH:/path/to/anchor-zig/tools/anchor-zig-cli/zig-out/bin"
 ```
 
+### Configure solana-zig
+
+For building Solana programs (SBF target), you need to use `solana-zig` compiler:
+
+```bash
+# Set environment variable
+export SOLANA_ZIG=/path/to/solana-zig/zig
+
+# Or use --zig option
+anchor-zig --zig /path/to/solana-zig/zig build
+```
+
 ## Commands
 
 ### `init` - Create a new project
@@ -153,18 +165,19 @@ cd my_counter
 # Edit build.zig.zon to set dependency paths
 # Edit src/main.zig to implement your program
 
-# Build the program
-anchor-zig build
+# Build the program (requires solana-zig)
+SOLANA_ZIG=/path/to/solana-zig/zig anchor-zig build
+# Or: anchor-zig --zig /path/to/solana-zig/zig build
 
 # Generate IDL
 anchor-zig idl generate
 
-# Run tests
+# Run tests (if test step is defined)
 anchor-zig test
 
 # Deploy (start local validator first)
 solana-test-validator &
-anchor-zig deploy
+anchor-zig deploy -p zig-out/lib/my_counter.so
 ```
 
 ## Requirements
