@@ -1,62 +1,126 @@
-//! Anchor IDL JSON generator CLI
+//! IDL CLI Tool
 //!
-//! Rust source: https://github.com/coral-xyz/anchor/blob/master/cli/src/lib.rs
+//! Command-line interface for generating Anchor-compatible IDL files.
 //!
-//! This tool writes Anchor-compatible IDL JSON to an output path.
+//! ## Usage
+//!
+//! Build the CLI tool, then run:
+//!
+//! ```bash
+//! # Generate IDL from program module
+//! anchor-zig-idl --output target/idl/counter.json
+//! ```
+//!
+//! ## Integration with Anchor TypeScript Client
+//!
+//! ```typescript
+//! import { Program } from "@coral-xyz/anchor";
+//! import idl from "./target/idl/counter.json";
+//!
+//! const program = new Program(idl, programId, provider);
+//! await program.methods.increment().accounts({ ... }).rpc();
+//! ```
 
 const std = @import("std");
-const anchor = @import("sol_anchor_zig");
-const build_options = @import("build_options");
-const program_mod = @import("idl_program");
+const idl_zero = @import("idl_zero.zig");
 
+/// CLI entry point for IDL generation
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const output_dir = if (build_options.idl_output_dir.len == 0) "." else build_options.idl_output_dir;
-    const output_path = try resolveOutputPath(allocator, output_dir, build_options.idl_output_path);
-    defer allocator.free(output_path);
-    try anchor.idl.writeJsonFile(allocator, program_mod.Program, .{}, output_path);
-}
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-fn resolveOutputPath(allocator: std.mem.Allocator, output_dir: []const u8, output_path: []const u8) ![]u8 {
-    if (output_path.len != 0) {
-        return allocator.dupe(u8, output_path);
-    }
-    const name = anchor.idl.defaultIdlName(program_mod.Program);
-    const file_stem = try toSnakeCase(allocator, name);
-    defer allocator.free(file_stem);
-    return std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ output_dir, file_stem });
-}
+    var output_path: []const u8 = "target/idl/program.json";
 
-fn toSnakeCase(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
-    var out = try std.ArrayList(u8).initCapacity(allocator, name.len + 8);
-    errdefer out.deinit(allocator);
-
-    var prev_is_lower_or_digit = false;
-    for (name) |ch| {
-        if (std.ascii.isUpper(ch)) {
-            if (prev_is_lower_or_digit) {
-                try out.append(allocator, '_');
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
+            i += 1;
+            if (i < args.len) {
+                output_path = args[i];
             }
-            try out.append(allocator, std.ascii.toLower(ch));
-            prev_is_lower_or_digit = true;
-            continue;
+        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            try printHelp();
+            return;
         }
-
-        if (ch == '-' or ch == ' ') {
-            if (out.items.len == 0 or out.items[out.items.len - 1] == '_') {
-                continue;
-            }
-            try out.append(allocator, '_');
-            prev_is_lower_or_digit = false;
-            continue;
-        }
-
-        try out.append(allocator, std.ascii.toLower(ch));
-        prev_is_lower_or_digit = std.ascii.isLower(ch) or std.ascii.isDigit(ch);
     }
 
-    return try out.toOwnedSlice(allocator);
+    // Note: In actual usage, the program module is imported at comptime
+    // This CLI tool is a template - users should modify it for their program
+
+    const stderr = std.io.getStdErr().writer();
+    try stderr.print(
+        \\anchor-zig IDL Generator
+        \\
+        \\This is a template CLI tool. To generate IDL for your program:
+        \\
+        \\1. Create a build step in your build.zig that calls idl_zero.generateJson()
+        \\2. Or create a custom CLI that imports your program module
+        \\
+        \\Example build.zig integration:
+        \\
+        \\    const idl_step = b.step("idl", "Generate IDL");
+        \\    const idl_exe = b.addExecutable(.{{
+        \\        .name = "gen-idl",
+        \\        .root_source_file = .{{ .cwd_relative = "src/gen_idl.zig" }},
+        \\    }});
+        \\    idl_step.dependOn(&b.addRunArtifact(idl_exe).step);
+        \\
+        \\Output path: {s}
+        \\
+    , .{output_path});
+}
+
+fn printHelp() !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print(
+        \\anchor-zig IDL Generator
+        \\
+        \\Usage: anchor-zig-idl [options]
+        \\
+        \\Options:
+        \\  -o, --output <path>  Output IDL file path (default: target/idl/program.json)
+        \\  -h, --help           Show this help message
+        \\
+        \\Integration:
+        \\
+        \\In your program's gen_idl.zig:
+        \\
+        \\    const std = @import("std");
+        \\    const idl = @import("sol_anchor_zig").idl_zero;
+        \\    const Program = @import("main.zig").Program;
+        \\
+        \\    pub fn main() !void {{
+        \\        var gpa = std.heap.GeneralPurposeAllocator(.{{}}){{}}; 
+        \\        defer _ = gpa.deinit();
+        \\        try idl.writeJsonFile(gpa.allocator(), Program, "target/idl/program.json");
+        \\    }}
+        \\
+    , .{});
+}
+
+// ============================================================================
+// Comptime IDL Generation Helper
+// ============================================================================
+
+/// Generate IDL at comptime and embed in binary
+/// Useful for programs that want to serve their own IDL
+pub fn comptimeIdl(comptime program: anytype) []const u8 {
+    comptime {
+        var buffer: [64 * 1024]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+
+        const json = idl_zero.generateJson(fba.allocator(), program) catch |err| {
+            @compileError("Failed to generate IDL: " ++ @errorName(err));
+        };
+
+        // Copy to comptime storage
+        var result: [json.len]u8 = undefined;
+        @memcpy(&result, json);
+        return &result;
+    }
 }

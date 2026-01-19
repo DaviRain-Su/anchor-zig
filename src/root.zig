@@ -136,16 +136,55 @@ pub const CUSTOM_ERROR_BASE = error_mod.CUSTOM_ERROR_BASE;
 pub const customErrorCode = error_mod.customErrorCode;
 
 // ============================================================================
-// IDL + Codegen (Standard API)
+// IDL Generation
 // ============================================================================
 
-/// Anchor IDL generation utilities
+/// IDL generation for zero_cu programs (recommended)
+///
+/// ```zig
+/// const idl = anchor.idl_zero;
+///
+/// pub const Program = struct {
+///     pub const id = sol.PublicKey.comptimeFromBase58("...");
+///     pub const name = "counter";
+///     pub const version = "0.1.0";
+///
+///     pub const instructions = .{
+///         idl.Instruction("increment", IncrementAccounts, void),
+///     };
+///
+///     pub const accounts = .{
+///         idl.AccountDef("Counter", CounterData),
+///     };
+/// };
+///
+/// // Generate IDL
+/// const json = try idl.generateJson(allocator, Program);
+/// ```
+pub const idl_zero = @import("idl_zero.zig");
+
+/// IDL instruction definition
+pub const IdlInstruction = idl_zero.Instruction;
+
+/// IDL account definition
+pub const IdlAccountDef = idl_zero.AccountDef;
+
+/// IDL event definition
+pub const IdlEventDef = idl_zero.EventDef;
+
+/// Generate IDL JSON for zero_cu program
+pub const generateIdlZero = idl_zero.generateJson;
+
+/// Write IDL JSON to file
+pub const writeIdlFile = idl_zero.writeJsonFile;
+
+/// Anchor IDL generation utilities (standard API, legacy)
 pub const idl = @import("idl.zig");
 
 /// Zig client code generation utilities
 pub const codegen = @import("codegen.zig");
 
-/// IDL config overrides
+/// IDL config overrides (standard API)
 pub const IdlConfig = idl.IdlConfig;
 
 /// Instruction descriptor for IDL/codegen
