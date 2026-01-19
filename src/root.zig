@@ -310,7 +310,30 @@ pub const CpiContext = cpi_context.CpiContext;
 pub const CpiContextWithConfig = cpi_context.CpiContextWithConfig;
 
 // ============================================================================
-// SPL Token Helpers
+// SPL Program Integrations (Anchor-style)
+// ============================================================================
+
+/// SPL Program Integrations
+///
+/// Provides Anchor-style wrappers for SPL programs:
+/// - `spl.token`: Token program (TokenAccount, MintAccount, Program, CPI helpers)
+///
+/// Usage:
+/// ```zig
+/// const anchor = @import("sol_anchor_zig");
+/// const spl = anchor.spl;
+///
+/// const Accounts = struct {
+///     source: spl.token.TokenAccount(.{ .mut = true }),
+///     destination: spl.token.TokenAccount(.{ .mut = true }),
+///     authority: anchor.zero_cu.Signer(0),
+///     token_program: spl.token.Program,
+/// };
+/// ```
+pub const spl = @import("spl/root.zig");
+
+// ============================================================================
+// SPL Token Helpers (Legacy - use spl.token instead)
 // ============================================================================
 
 /// SPL Token account wrappers and CPI helpers
@@ -319,10 +342,10 @@ pub const token = @import("token.zig");
 /// SPL Associated Token Account CPI helpers
 pub const associated_token = @import("associated_token.zig");
 
-/// Token account wrapper
+/// Token account wrapper (legacy - use spl.token.TokenAccount instead)
 pub const TokenAccount = token.TokenAccount;
 
-/// Mint account wrapper
+/// Mint account wrapper (legacy - use spl.token.MintAccount instead)
 pub const Mint = token.Mint;
 
 // ============================================================================
