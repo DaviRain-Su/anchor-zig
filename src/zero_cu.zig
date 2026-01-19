@@ -1393,8 +1393,11 @@ pub fn TokenProgram(comptime idx: usize) type {
 // ============================================================================
 
 test "accountSize calculation" {
-    try std.testing.expectEqual(@as(usize, 10336), accountSize(1));
-    try std.testing.expectEqual(@as(usize, 10328), accountSize(0));
+    // ACCOUNT_HEADER_SIZE (88) + data_len + ACCOUNT_DATA_PADDING (10240) + 8, aligned to 8
+    // For data_len=0: 88 + 0 + 10240 + 8 = 10336, aligned = 10336
+    // For data_len=1: 88 + 1 + 10240 + 8 = 10337, aligned = 10344
+    try std.testing.expectEqual(@as(usize, 10344), accountSize(1));
+    try std.testing.expectEqual(@as(usize, 10336), accountSize(0));
 }
 
 test "Signer has correct flags" {

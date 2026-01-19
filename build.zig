@@ -2,22 +2,9 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
-    const target = b.standardTargetOptions(.{
-        .default_target = @import("solana_program_sdk").sbf_target,
-    });
 
-    const solana_dep = b.dependency("solana_program_sdk", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const solana_mod = solana_dep.module("solana_program_sdk");
-
-    const anchor_mod = b.addModule("sol_anchor_zig", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    anchor_mod.addImport("solana_program_sdk", solana_mod);
+    // For the library itself, we use host target for tests
+    // Users building programs will use SBF target from their own build.zig
 
     const solana_host_dep = b.dependency("solana_program_sdk", .{
         .target = b.graph.host,
@@ -25,6 +12,15 @@ pub fn build(b: *std.Build) void {
     });
     const solana_host_mod = solana_host_dep.module("solana_program_sdk");
 
+    // Main anchor module (host target for library development/testing)
+    const anchor_mod = b.addModule("sol_anchor_zig", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+    anchor_mod.addImport("solana_program_sdk", solana_host_mod);
+
+    // Also export a host module explicitly
     const anchor_host_mod = b.addModule("sol_anchor_zig_host", .{
         .root_source_file = b.path("src/root.zig"),
         .target = b.graph.host,
@@ -32,6 +28,7 @@ pub fn build(b: *std.Build) void {
     });
     anchor_host_mod.addImport("solana_program_sdk", solana_host_mod);
 
+    // IDL generation
     const idl_program_path = b.option([]const u8, "idl-program", "Program module path for IDL generation") orelse "src/idl_example.zig";
     const idl_output_path = b.option([]const u8, "idl-output", "IDL output path") orelse "idl/anchor.json";
 
@@ -67,8 +64,13 @@ pub fn build(b: *std.Build) void {
     const idl_step = b.step("idl", "Generate Anchor IDL JSON");
     idl_step.dependOn(&run_idl.step);
 
+    // Unit tests
     const lib_unit_tests = b.addTest(.{
-        .root_module = anchor_host_mod,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = b.graph.host,
+            .optimize = optimize,
+        }),
     });
     lib_unit_tests.root_module.addImport("solana_program_sdk", solana_host_mod);
 
