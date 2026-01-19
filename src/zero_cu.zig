@@ -693,6 +693,7 @@ pub fn StaticCtx(comptime Accounts: type) type {
 }
 
 pub fn ZeroInstructionContext(comptime Accounts: type) type {
+    @setEvalBranchQuota(100000);
     const data_lens = accountDataLengths(Accounts);
     const fields = std.meta.fields(Accounts);
 
