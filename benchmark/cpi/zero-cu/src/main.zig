@@ -1,48 +1,63 @@
-//! CPI Benchmark - zero_cu style entry()
+//! CPI Benchmark - Using anchor-zig zero_cu program() API
 //!
-//! Same as rosetta but with discriminator check (like zero_cu entry()).
-//! Uses manual discriminator check to match entry() behavior.
+//! Demonstrates CPI (Cross-Program Invocation) with anchor-zig.
+//! Uses zero.program() with dynamic context loading.
 
-const std = @import("std");
-const sol = @import("solana_program_sdk");
-const sol_lib = @import("solana_program_library");
+const anchor = @import("sol_anchor_zig");
+const zero = anchor.zero_cu;
+const sol = anchor.sdk;
 
-const system_ix = sol_lib.system;
 const SIZE: u64 = 42;
 
-// Precompute discriminator for "allocate"
-const DISCRIMINATOR: u64 = blk: {
-    @setEvalBranchQuota(10000);
-    const preimage = "global:allocate";
-    var hash: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(preimage, &hash, .{});
-    break :blk @as(u64, @bitCast(hash[0..8].*));
+// ============================================================================
+// Accounts
+// ============================================================================
+
+const AllocateAccounts = struct {
+    allocated: zero.Mut(0),
+    system_program: zero.Readonly(0),
 };
 
-export fn entrypoint(input: [*]u8) u64 {
-    const context = sol.context.Context.load(input) catch return 1;
-    
-    // Check discriminator (like zero_cu entry())
-    const disc: *align(1) const u64 = @ptrCast(context.data.ptr);
-    if (disc.* != DISCRIMINATOR) return 1;
-    
-    const allocated = context.accounts[0];
-    const bump = context.data[8]; // After 8-byte discriminator
+// ============================================================================
+// Arguments
+// ============================================================================
 
-    // Verify PDA
-    const expected_key = sol.public_key.PublicKey.createProgramAddress(
-        &.{ "You pass butter", &.{bump} },
-        context.program_id.*,
-    ) catch return 1;
+const AllocateArgs = struct {
+    bump: u8,
+};
 
-    if (!allocated.id().equals(expected_key)) return 1;
+// ============================================================================
+// Handler
+// ============================================================================
 
-    // Invoke system program to allocate
-    system_ix.allocate(.{
+fn allocateHandler(ctx: *const zero.Ctx(AllocateAccounts)) !void {
+    const args = ctx.args(AllocateArgs);
+    const allocated = ctx.accounts().allocated;
+
+    // Verify PDA using syscall
+    const expected_key = sol.public_key.createProgramAddress(
+        &.{ "You pass butter", &.{args.bump} },
+        ctx.programId().*,
+    ) catch return error.InvalidPda;
+
+    if (!allocated.id().*.equals(expected_key)) {
+        return error.InvalidPda;
+    }
+
+    // Invoke system program to allocate using CPI helper
+    sol.system_program.allocateCpi(.{
         .account = allocated.info(),
         .space = SIZE,
-        .seeds = &.{&.{ "You pass butter", &.{bump} }},
-    }) catch return 1;
+        .seeds = &.{&.{ "You pass butter", &.{args.bump} }},
+    }) catch return error.AllocateFailed;
+}
 
-    return 0;
+// ============================================================================
+// Program Entry
+// ============================================================================
+
+comptime {
+    zero.program(.{
+        zero.ix("allocate", AllocateAccounts, allocateHandler),
+    });
 }
