@@ -1,0 +1,17 @@
+.{
+    .name = .pubkey_program_single,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0x98be52f4f21d7fec,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .path = "../../../../solana-program-sdk-zig",
+        },
+        .sol_anchor_zig = .{ .path = "../../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
