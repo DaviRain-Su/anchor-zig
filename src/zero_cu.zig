@@ -666,6 +666,196 @@ pub fn ZeroContext(comptime config: struct {
 }
 
 // ============================================================================
+// CPI Helpers (Account Operations)
+// ============================================================================
+
+/// Get minimum rent-exempt balance for given space
+pub fn rentExemptBalance(space: usize) u64 {
+    const rent = sol.rent.Rent.getOrDefault();
+    return rent.getMinimumBalance(space);
+}
+
+/// Close an account, transfer all lamports to destination
+/// 
+/// Usage:
+/// ```zig
+/// try zero.closeAccount(ctx.accounts.closeable, ctx.accounts.destination);
+/// ```
+pub fn closeAccount(account: anytype, destination: anytype) !void {
+    // Transfer lamports
+    const account_lamports = account.lamports();
+    const dest_lamports = destination.lamports();
+    dest_lamports.* += account_lamports.*;
+    account_lamports.* = 0;
+
+    // Zero account data
+    const data = account.dataSlice();
+    const data_ptr: [*]u8 = @ptrFromInt(@intFromPtr(data.ptr));
+    @memset(data_ptr[0..data.len], 0);
+}
+
+/// Create account via CPI to system program
+///
+/// Usage:
+/// ```zig
+/// try zero.createAccount(
+///     ctx.accounts.payer,
+///     ctx.accounts.new_account,
+///     space,
+///     owner,
+/// );
+/// ```
+pub fn createAccount(
+    payer: anytype,
+    new_account: anytype,
+    space: usize,
+    owner: PublicKey,
+) !void {
+    const lamports = rentExemptBalance(space);
+    
+    const payer_info = SdkAccount.Info{
+        .id = payer.id(),
+        .lamports = payer.lamports(),
+        .data = @constCast(payer.dataSlice()),
+        .owner = payer.ownerId(),
+        .rent_epoch = 0,
+        .is_signer = if (payer.isSigner()) 1 else 0,
+        .is_writable = if (payer.isWritable()) 1 else 0,
+        .is_executable = if (payer.isExecutable()) 1 else 0,
+    };
+    
+    const new_info = SdkAccount.Info{
+        .id = new_account.id(),
+        .lamports = new_account.lamports(),
+        .data = @constCast(new_account.dataSlice()),
+        .owner = new_account.ownerId(),
+        .rent_epoch = 0,
+        .is_signer = if (new_account.isSigner()) 1 else 0,
+        .is_writable = if (new_account.isWritable()) 1 else 0,
+        .is_executable = if (new_account.isExecutable()) 1 else 0,
+    };
+
+    sol.system_program.createAccount(
+        payer_info,
+        new_info,
+        lamports,
+        space,
+        &owner,
+    ) catch return error.CreateAccountFailed;
+}
+
+/// Create PDA account via CPI with seeds
+pub fn createPdaAccount(
+    payer: anytype,
+    new_account: anytype,
+    space: usize,
+    owner: PublicKey,
+    seeds: []const []const u8,
+    bump: u8,
+) !void {
+    const lamports = rentExemptBalance(space);
+    
+    const payer_info = SdkAccount.Info{
+        .id = payer.id(),
+        .lamports = payer.lamports(),
+        .data = @constCast(payer.dataSlice()),
+        .owner = payer.ownerId(),
+        .rent_epoch = 0,
+        .is_signer = if (payer.isSigner()) 1 else 0,
+        .is_writable = if (payer.isWritable()) 1 else 0,
+        .is_executable = if (payer.isExecutable()) 1 else 0,
+    };
+    
+    const new_info = SdkAccount.Info{
+        .id = new_account.id(),
+        .lamports = new_account.lamports(),
+        .data = @constCast(new_account.dataSlice()),
+        .owner = new_account.ownerId(),
+        .rent_epoch = 0,
+        .is_signer = if (new_account.isSigner()) 1 else 0,
+        .is_writable = if (new_account.isWritable()) 1 else 0,
+        .is_executable = if (new_account.isExecutable()) 1 else 0,
+    };
+
+    // Add bump to seeds
+    var full_seeds: [17][]const u8 = undefined;
+    const bump_bytes = [_]u8{bump};
+    for (seeds, 0..) |s, i| {
+        full_seeds[i] = s;
+    }
+    full_seeds[seeds.len] = &bump_bytes;
+
+    sol.system_program.createAccountWithSeed(
+        payer_info,
+        new_info,
+        lamports,
+        space,
+        &owner,
+        full_seeds[0 .. seeds.len + 1],
+    ) catch return error.CreateAccountFailed;
+}
+
+/// Transfer lamports between accounts
+pub fn transferLamports(from: anytype, to: anytype, amount: u64) !void {
+    const from_lamports = from.lamports();
+    const to_lamports = to.lamports();
+    
+    if (from_lamports.* < amount) {
+        return error.InsufficientFunds;
+    }
+    
+    from_lamports.* -= amount;
+    to_lamports.* += amount;
+}
+
+/// Write discriminator to account data
+pub fn writeDiscriminator(account: anytype, comptime name: []const u8) void {
+    const disc = discriminator_mod.accountDiscriminator(name);
+    const data = account.dataMut(8);
+    @memcpy(data, &disc);
+}
+
+/// Check if account is uninitialized (zero lamports or zero discriminator)
+pub fn isUninitialized(account: anytype) bool {
+    if (account.lamports().* == 0) return true;
+    const disc: *const [8]u8 = @ptrCast(account.data(8));
+    return std.mem.allEqual(u8, disc, 0);
+}
+
+// ============================================================================
+// Program/SystemAccount Types
+// ============================================================================
+
+/// System Program marker
+pub fn SystemProgram(comptime idx: usize) type {
+    return struct {
+        pub const data_size = 0;
+        pub const DataType = void;
+        pub const is_signer = false;
+        pub const is_writable = false;
+        pub const has_typed_data = false;
+        pub const account_index = idx;
+        pub const CONSTRAINTS = AccountConstraints{
+            .address = sol.system_program.ID,
+        };
+    };
+}
+
+/// Token Program marker
+pub fn TokenProgram(comptime idx: usize) type {
+    return struct {
+        pub const data_size = 0;
+        pub const DataType = void;
+        pub const is_signer = false;
+        pub const is_writable = false;
+        pub const has_typed_data = false;
+        pub const account_index = idx;
+        // Token program ID would be checked here
+        pub const CONSTRAINTS = AccountConstraints{};
+    };
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -685,4 +875,9 @@ test "Account with constraints" {
     const A = Account(TestData, .{ .owner = PublicKey.default() });
     try std.testing.expectEqual(@as(usize, 8), A.data_size);
     try std.testing.expect(A.CONSTRAINTS.owner != null);
+}
+
+test "rentExemptBalance" {
+    const balance = rentExemptBalance(100);
+    try std.testing.expect(balance > 0);
 }

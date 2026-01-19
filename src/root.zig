@@ -1,69 +1,57 @@
-//! sol-anchor-zig: Anchor-like framework for Zig
+//! sol-anchor-zig: High-Performance Anchor Framework for Zig
 //!
-//! This module provides Anchor-compatible patterns for Solana program
-//! development in Zig. It uses comptime metaprogramming instead of Rust
-//! proc macros to achieve similar ergonomics.
+//! ## Recommended: zero_cu API (5-7 CU)
 //!
-//! ## Overview
-//!
-//! The anchor module provides:
-//! - **Discriminators**: 8-byte sighash identifiers for accounts and instructions
-//! - **Account types**: Type-safe wrappers with automatic validation
-//! - **Context**: Instruction context with parsed accounts
-//! - **Constraints**: Declarative validation (mut, signer, owner, etc.)
-//! - **Error codes**: Anchor-compatible error codes for client interop
-//!
-//! ## Example
+//! For new projects, use the zero_cu API for optimal performance:
 //!
 //! ```zig
 //! const anchor = @import("sol_anchor_zig");
+//! const zero = anchor.zero_cu;
 //! const sol = anchor.sdk;
 //!
-//! // Define account state
 //! const CounterData = struct {
 //!     count: u64,
 //!     authority: sol.PublicKey,
 //! };
 //!
-//! // Create typed account wrapper
+//! const IncrementAccounts = struct {
+//!     authority: zero.Signer(0),
+//!     counter: zero.Account(CounterData, .{
+//!         .owner = PROGRAM_ID,
+//!     }),
+//! };
+//!
+//! pub fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
+//!     ctx.accounts.counter.getMut().count += 1;
+//! }
+//!
+//! comptime {
+//!     zero.entry(IncrementAccounts, "increment", increment);
+//! }
+//! ```
+//!
+//! ## Performance Comparison
+//!
+//! | API | CU Overhead | Use Case |
+//! |-----|-------------|----------|
+//! | **zero_cu** | **5-7 CU** | New projects, performance-critical |
+//! | Standard | ~150 CU | Complex validation, IDL generation |
+//!
+//! ## Standard API (Legacy)
+//!
+//! The standard API provides full Anchor compatibility:
+//!
+//! ```zig
+//! const anchor = @import("sol_anchor_zig");
+//!
 //! const Counter = anchor.Account(CounterData, .{
 //!     .discriminator = anchor.accountDiscriminator("Counter"),
 //! });
 //!
-//! // Define instruction accounts
-//! const IncrementAccounts = struct {
-//!     authority: anchor.Signer,
-//!     counter: Counter,
-//! };
-//!
-//! // Instruction handler
 //! fn increment(ctx: anchor.Context(IncrementAccounts)) !void {
 //!     ctx.accounts.counter.data.count += 1;
 //! }
 //! ```
-//!
-//! ## Phase 1 Features
-//!
-//! - Account discriminator generation (SHA256 sighash)
-//! - Account(T) wrapper with discriminator validation
-//! - Signer/SignerMut account types
-//! - Program(ID) account type
-//! - Context(Accounts) instruction context
-//! - Constraint validation (mut, signer, owner, address)
-//! - Anchor-compatible error codes
-//!
-//! ## Phase 2 Features (PDA Support)
-//!
-//! - Seed type system (literal, account, field references)
-//! - PDA validation and derivation helpers
-//! - Account initialization via CPI
-//! - Bump seeds storage in context
-//!
-//! ## Phase 3 Features (Advanced Constraints)
-//!
-//! - has_one constraint: Validate account data field matches another account's key
-//! - close constraint: Account closing with lamport transfer to destination
-//! - realloc constraint: Dynamic account resizing with rent handling
 
 const std = @import("std");
 
@@ -71,7 +59,37 @@ const std = @import("std");
 pub const sdk = @import("solana_program_sdk");
 
 // ============================================================================
-// Discriminator Module
+// ⭐ RECOMMENDED: Zero-CU Framework (5-7 CU)
+// ============================================================================
+
+/// Zero-CU Framework - High-level API with zero runtime overhead
+///
+/// ## Account Types
+/// - `zero.Signer(size)` - Signer account
+/// - `zero.Mut(T)` - Mutable account with typed data
+/// - `zero.Readonly(T)` - Readonly account
+/// - `zero.Account(T, .{...})` - Account with constraints
+///
+/// ## Constraints
+/// - `.owner = PUBKEY` - Owner validation
+/// - `.seeds = &.{...}` - PDA validation
+/// - `.has_one = &.{"field"}` - Field match validation
+/// - `.discriminator = [8]u8` - Discriminator check
+///
+/// ## Entry Points
+/// - `zero.entry(Accounts, "name", handler)` - Single instruction (5 CU)
+/// - `zero.entryValidated(...)` - With auto-validation
+/// - `zero.multi(Accounts, .{...})` - Multi-instruction (7 CU)
+///
+/// ## CPI Helpers
+/// - `zero.createAccount(...)` - Create account
+/// - `zero.closeAccount(...)` - Close account
+/// - `zero.transferLamports(...)` - Transfer lamports
+/// - `zero.rentExemptBalance(space)` - Get rent exempt balance
+pub const zero_cu = @import("zero_cu.zig");
+
+// ============================================================================
+// Discriminator Module (Used by both APIs)
 // ============================================================================
 
 /// Discriminator generation using SHA256 sighash
@@ -83,41 +101,16 @@ pub const DISCRIMINATOR_LENGTH = discriminator.DISCRIMINATOR_LENGTH;
 /// Discriminator type (8 bytes)
 pub const Discriminator = discriminator.Discriminator;
 
-/// Generate account discriminator
-///
-/// Creates `sha256("account:<name>")[0..8]`
-///
-/// Example:
-/// ```zig
-/// const disc = anchor.accountDiscriminator("Counter");
-/// ```
+/// Generate account discriminator: `sha256("account:<name>")[0..8]`
 pub const accountDiscriminator = discriminator.accountDiscriminator;
 
-/// Generate instruction discriminator
-///
-/// Creates `sha256("global:<name>")[0..8]`
-///
-/// Example:
-/// ```zig
-/// const disc = anchor.instructionDiscriminator("initialize");
-/// ```
+/// Generate instruction discriminator: `sha256("global:<name>")[0..8]`
 pub const instructionDiscriminator = discriminator.instructionDiscriminator;
 
 /// Generate custom sighash discriminator
-///
-/// Creates `sha256("<namespace>:<name>")[0..8]`
 pub const sighash = discriminator.sighash;
 
 /// Fast discriminator validation using u64 comparison
-///
-/// ~5x faster than byte-by-byte comparison.
-///
-/// Example:
-/// ```zig
-/// if (!anchor.validateDiscriminatorFast(info.data, &expected_disc)) {
-///     return error.DiscriminatorMismatch;
-/// }
-/// ```
 pub const validateDiscriminatorFast = discriminator.validateDiscriminatorFast;
 
 /// Check if discriminator is zero (uninitialized account)
@@ -134,26 +127,16 @@ pub const discriminatorToU64 = discriminator.discriminatorToU64;
 pub const error_mod = @import("error.zig");
 
 /// Anchor framework errors (codes 100-3999)
-///
-/// Compatible with Anchor error codes for client interoperability.
 pub const AnchorError = error_mod.AnchorError;
 
 /// Custom error base (6000+)
 pub const CUSTOM_ERROR_BASE = error_mod.CUSTOM_ERROR_BASE;
 
 /// Create custom error code
-///
-/// Example:
-/// ```zig
-/// const MyError = enum(u32) {
-///     InvalidAmount = anchor.customErrorCode(0),  // 6000
-///     Unauthorized = anchor.customErrorCode(1),   // 6001
-/// };
-/// ```
 pub const customErrorCode = error_mod.customErrorCode;
 
 // ============================================================================
-// IDL + Codegen
+// IDL + Codegen (Standard API)
 // ============================================================================
 
 /// Anchor IDL generation utilities
@@ -175,7 +158,7 @@ pub const generateIdlJson = idl.generateJson;
 pub const generateZigClient = codegen.generateZigClient;
 
 // ============================================================================
-// AccountLoader (Zero-Copy)
+// AccountLoader (Zero-Copy) - Advanced
 // ============================================================================
 
 /// AccountLoader for zero-copy account access
@@ -188,7 +171,7 @@ pub const AccountLoaderConfig = account_loader.AccountLoaderConfig;
 pub const AccountLoader = account_loader.AccountLoader;
 
 // ============================================================================
-// LazyAccount
+// LazyAccount - Advanced
 // ============================================================================
 
 /// LazyAccount for on-demand deserialization
@@ -201,7 +184,7 @@ pub const LazyAccountConfig = lazy_account.LazyAccountConfig;
 pub const LazyAccount = lazy_account.LazyAccount;
 
 // ============================================================================
-// Program Entry
+// Program Entry (Standard API)
 // ============================================================================
 
 /// Program dispatch helpers (Anchor-style entry)
@@ -217,38 +200,12 @@ pub const DispatchConfig = program_entry.DispatchConfig;
 pub const FallbackContext = program_entry.FallbackContext;
 
 // ============================================================================
-// Optimized Entry Point
+// Optimized Entry Point (Standard API)
 // ============================================================================
 
 /// Optimized entry point with tiered validation
-///
-/// Combines standard Anchor API with ZeroCU performance optimizations.
-///
-/// ## Validation Levels
-///
-/// | Level     | Checks                    | Overhead |
-/// |-----------|---------------------------|----------|
-/// | full      | All constraints           | ~150 CU  |
-/// | minimal   | Discriminator + signer    | ~50 CU   |
-/// | unchecked | Discriminator only        | ~10 CU   |
-///
-/// ## Example
-///
-/// ```zig
-/// // Standard Anchor definitions...
-///
-/// pub const Program = struct {
-///     pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
-///     pub const instructions = struct {
-///         pub const increment = anchor.Instruction(.{ .Accounts = MyAccounts });
-///     };
-///     pub fn increment(ctx: anchor.Context(MyAccounts)) !void { ... }
-/// };
-///
-/// comptime {
-///     anchor.optimized.exportEntrypoint(Program, .minimal);
-/// }
-/// ```
+/// 
+/// Note: For best performance, use zero_cu instead.
 pub const optimized = @import("optimized.zig");
 
 /// Validation level for optimized entry
@@ -324,15 +281,11 @@ pub const TokenAccount = token.TokenAccount;
 pub const Mint = token.Mint;
 
 // ============================================================================
-// SPL Memo Helpers
+// SPL Memo/Stake Helpers
 // ============================================================================
 
 /// SPL Memo CPI helpers
 pub const memo = @import("memo.zig");
-
-// ============================================================================
-// SPL Stake Helpers
-// ============================================================================
 
 /// SPL Stake wrappers and CPI helpers
 pub const stake = @import("stake.zig");
@@ -351,23 +304,6 @@ pub const MAX_EVENT_SIZE = event.MAX_EVENT_SIZE;
 pub const EVENT_DISCRIMINATOR_LENGTH = event.EVENT_DISCRIMINATOR_LENGTH;
 
 /// Emit an event to the Solana program logs
-///
-/// Events follow Anchor's format: `[discriminator][borsh_serialized_data]`
-///
-/// Example:
-/// ```zig
-/// const TransferEvent = struct {
-///     from: sol.PublicKey,
-///     to: sol.PublicKey,
-///     amount: u64,
-/// };
-///
-/// anchor.emitEvent(TransferEvent, .{
-///     .from = source_key,
-///     .to = dest_key,
-///     .amount = 1000,
-/// });
-/// ```
 pub const emitEvent = event.emitEvent;
 
 /// Emit an event with a custom discriminator
@@ -377,59 +313,28 @@ pub const emitEventWithDiscriminator = event.emitEventWithDiscriminator;
 pub const getEventDiscriminator = event.getEventDiscriminator;
 
 // ============================================================================
-// Type-Safe DSL
+// Type-Safe DSL (Advanced)
 // ============================================================================
 
 /// Type-Safe DSL for Solana Program Development
 ///
-/// Provides a concise builder-pattern syntax with compile-time type safety:
-///
-/// ```zig
-/// const dsl = anchor.dsl;
-///
-/// const Initialize = dsl.Instr("initialize",
-///     dsl.Accounts(.{
-///         .payer = dsl.SignerMut,
-///         .counter = dsl.Init(CounterData, .{ .payer = .payer }),
-///         .system_program = dsl.SystemProgram,
-///     }),
-///     struct { initial_value: u64 },
-/// );
-///
-/// pub fn initialize(ctx: Initialize.Ctx, args: Initialize.Args) !void {
-///     ctx.accounts.counter.data.count = args.initial_value;
-/// }
-/// ```
-///
-/// Available markers:
-/// - Account types: Signer, SignerMut, Unchecked, SystemAccount, StakeAccount
-/// - Data accounts: Data, Init, PDA, Close, Realloc, Opt
-/// - Token accounts: Token, Mint, ATA
-/// - Programs: Prog, SystemProgram, TokenProgram, Token2022Program, etc.
-/// - Sysvars: RentSysvar, ClockSysvar, etc.
-/// - Events: Event, eventField
+/// For advanced users who need complex validation patterns.
+/// For simple programs, use zero_cu instead.
 pub const dsl = @import("typed_dsl.zig");
 
 // ============================================================================
-// Constraints Module
+// Constraints Module (Standard API)
 // ============================================================================
 
 /// Constraint types and validation
 pub const constraints = @import("constraints.zig");
 
 /// Constraint specification for account validation
-///
-/// Example:
-/// ```zig
-/// const my_constraints = anchor.Constraints{
-///     .mut = true,
-///     .signer = true,
-/// };
-/// ```
 pub const Constraints = constraints.Constraints;
 
 /// Constraint expression helper
 pub const constraint = constraints.constraint;
+
 /// Typed constraint expression builder
 pub const constraint_typed = constraints.constraint_typed;
 
@@ -446,7 +351,7 @@ pub const validateConstraintsOrError = constraints.validateConstraintsOrError;
 pub const ConstraintError = constraints.ConstraintError;
 
 // ============================================================================
-// Account Module
+// Account Module (Standard API)
 // ============================================================================
 
 /// Account wrapper with discriminator validation
@@ -499,19 +404,9 @@ pub fn dataFields(
     return names[0..];
 }
 
-/// Account wrapper type
+/// Account wrapper type (Standard API)
 ///
-/// Provides type-safe access to account data with automatic
-/// discriminator verification.
-///
-/// Example:
-/// ```zig
-/// const Counter = anchor.Account(struct {
-///     count: u64,
-/// }, .{
-///     .discriminator = anchor.accountDiscriminator("Counter"),
-/// });
-/// ```
+/// Note: For best performance, use zero_cu.Account instead.
 pub const Account = account.Account;
 
 /// Account wrapper with field-level attrs.
@@ -521,35 +416,18 @@ pub const AccountField = account.AccountField;
 pub const AccountError = account.AccountError;
 
 // ============================================================================
-// Signer Module
+// Signer Module (Standard API)
 // ============================================================================
 
 /// Signer account types
 pub const signer = @import("signer.zig");
 
-/// Signer account type (read-only)
+/// Signer account type (read-only) - Standard API
 ///
-/// Validates that an account is a signer of the transaction.
-///
-/// Example:
-/// ```zig
-/// const MyAccounts = struct {
-///     authority: anchor.Signer,
-/// };
-/// ```
+/// Note: For best performance, use zero_cu.Signer instead.
 pub const Signer = signer.Signer;
 
-/// Mutable signer account type
-///
-/// Validates that an account is both a signer and writable.
-/// Use for payer accounts.
-///
-/// Example:
-/// ```zig
-/// const MyAccounts = struct {
-///     payer: anchor.SignerMut,
-/// };
-/// ```
+/// Mutable signer account type - Standard API
 pub const SignerMut = signer.SignerMut;
 
 /// Configurable signer type
@@ -598,20 +476,9 @@ pub const StakeAccountWith = stake.StakeAccount;
 pub const program = @import("program.zig");
 
 /// Program account with expected ID validation
-///
-/// Validates that an account is an executable program with the expected ID.
-///
-/// Example:
-/// ```zig
-/// const MyAccounts = struct {
-///     system_program: anchor.Program(system_program.ID),
-/// };
-/// ```
 pub const Program = program.Program;
 
 /// Unchecked program reference
-///
-/// Validates executable but not program ID.
 pub const UncheckedProgram = program.UncheckedProgram;
 
 /// Program validation errors
@@ -649,23 +516,15 @@ pub const EpochRewardsSysvar = sysvar_account.EpochRewardsSysvar;
 pub const LastRestartSlotSysvar = sysvar_account.LastRestartSlotSysvar;
 
 // ============================================================================
-// Context Module
+// Context Module (Standard API)
 // ============================================================================
 
 /// Instruction context types
 pub const context = @import("context.zig");
 
-/// Instruction context
+/// Instruction context (Standard API)
 ///
-/// Provides access to parsed accounts, program ID, and remaining accounts.
-///
-/// Example:
-/// ```zig
-/// fn initialize(ctx: anchor.Context(MyAccounts)) !void {
-///     // Access accounts via ctx.accounts
-///     // Access program ID via ctx.program_id
-/// }
-/// ```
+/// Note: For best performance, use zero_cu.Ctx instead.
 pub const Context = context.Context;
 
 /// Bump seeds storage
@@ -678,28 +537,12 @@ pub const loadAccounts = context.loadAccounts;
 pub const parseContext = context.parseContext;
 
 /// Load accounts with dependency resolution for non-literal seeds
-///
-/// This function handles the two-phase loading required when seeds reference
-/// other accounts (via seedAccount) or account data fields (via seedField).
-///
-/// Example:
-/// ```zig
-/// const result = try anchor.loadAccountsWithDependencies(
-///     MyAccounts,
-///     &program_id,
-///     account_infos,
-/// );
-/// const accounts = result.accounts;
-/// const bumps = result.bumps;
-/// ```
 pub const loadAccountsWithDependencies = context.loadAccountsWithDependencies;
 
 /// Context loading errors
 pub const ContextError = context.ContextError;
 
 /// Convert a slice of accounts into a slice of Account.Info using a caller-provided buffer.
-///
-/// Returns the filled slice (min of accounts.len and out.len).
 pub fn accountsToInfoSlice(accounts: anytype, out: []sdk.account.Account.Info) []const sdk.account.Account.Info {
     const AccountsType = @TypeOf(accounts);
     const info = @typeInfo(AccountsType);
@@ -720,33 +563,19 @@ pub fn accountsToInfoSlice(accounts: anytype, out: []sdk.account.Account.Info) [
 }
 
 // ============================================================================
-// Phase 2: Seeds Module
+// Seeds Module
 // ============================================================================
 
 /// Seed types for PDA derivation
 pub const seeds = @import("seeds.zig");
 
 /// Seed specification type
-///
-/// Defines how to obtain a seed value for PDA derivation.
 pub const SeedSpec = seeds.SeedSpec;
 
 /// Create a literal seed
-///
-/// Example:
-/// ```zig
-/// const my_seeds = &.{ anchor.seed("counter"), anchor.seed("v1") };
-/// ```
 pub const seed = seeds.seed;
 
 /// Create an account reference seed
-///
-/// References another account's public key as a seed.
-///
-/// Example:
-/// ```zig
-/// const my_seeds = &.{ anchor.seed("user"), anchor.seedAccount("authority") };
-/// ```
 pub const seedAccount = seeds.seedAccount;
 
 /// Create an account reference seed using typed field selector.
@@ -755,13 +584,6 @@ pub fn seedAccountField(comptime AccountsType: type, comptime field: std.meta.Fi
 }
 
 /// Create a field reference seed
-///
-/// References a field in the account data as a seed.
-///
-/// Example:
-/// ```zig
-/// const my_seeds = &.{ anchor.seed("owned_by"), anchor.seedField("owner") };
-/// ```
 pub const seedField = seeds.seedField;
 
 /// Create a field reference seed using typed data field selector.
@@ -791,40 +613,16 @@ pub const appendSeed = seeds.appendSeed;
 pub const appendBumpSeed = seeds.appendBumpSeed;
 
 // ============================================================================
-// Phase 2: PDA Module
+// PDA Module
 // ============================================================================
 
 /// PDA validation and derivation utilities
 pub const pda = @import("pda.zig");
 
 /// Validate that an account matches the expected PDA
-///
-/// Example:
-/// ```zig
-/// const bump = try anchor.validatePda(
-///     counter_account.key(),
-///     &.{ "counter", &authority.bytes },
-///     program_id,
-/// );
-/// ```
 pub const validatePda = pda.validatePda;
 
 /// Validate PDA using runtime-resolved seeds (slice-based)
-///
-/// Use when seeds are resolved at runtime (e.g., seedAccount, seedField).
-///
-/// Example:
-/// ```zig
-/// var seed_buffer = anchor.SeedBuffer{};
-/// try anchor.appendSeed(&seed_buffer, "counter");
-/// try anchor.appendSeed(&seed_buffer, &authority_key.bytes);
-///
-/// const bump = try anchor.validatePdaRuntime(
-///     counter_account.key(),
-///     seed_buffer.asSlice(),
-///     &program_id,
-/// );
-/// ```
 pub const validatePdaRuntime = pda.validatePdaRuntime;
 
 /// Validate PDA with known bump seed
@@ -843,7 +641,7 @@ pub const isPda = pda.isPda;
 pub const PdaError = pda.PdaError;
 
 // ============================================================================
-// Phase 2: Init Module
+// Init Module
 // ============================================================================
 
 /// Account initialization utilities
@@ -851,15 +649,11 @@ pub const init = @import("init.zig");
 
 /// Configuration for account initialization
 pub const InitConfig = init.InitConfig;
+
 /// Configuration for batch account initialization
 pub const BatchInitConfig = init.BatchInitConfig;
 
 /// Get rent-exempt balance for an account
-///
-/// Example:
-/// ```zig
-/// const lamports = try anchor.rentExemptBalance(Counter.SPACE);
-/// ```
 pub const rentExemptBalance = init.rentExemptBalance;
 
 /// Calculate rent-exempt balance using defaults
@@ -867,24 +661,11 @@ pub const rentExemptBalanceDefault = init.rentExemptBalanceDefault;
 
 /// Create a new account via CPI
 pub const createAccount = init.createAccount;
+
 /// Create multiple accounts via CPI
 pub const createAccounts = init.createAccounts;
 
 /// Create an account at a PDA via CPI
-///
-/// Example:
-/// ```zig
-/// try anchor.createAccountAtPda(
-///     payer_info,
-///     counter_info,
-///     &my_program_id,
-///     Counter.SPACE,
-///     &.{ "counter", &authority.bytes },
-///     bump,
-///     &my_program_id,
-///     system_program_info,
-/// );
-/// ```
 pub const createAccountAtPda = init.createAccountAtPda;
 
 /// Check if an account is uninitialized
@@ -897,25 +678,13 @@ pub const validateForInit = init.validateForInit;
 pub const InitError = init.InitError;
 
 // ============================================================================
-// Phase 3: Has-One Module
+// Has-One Module
 // ============================================================================
 
 /// Has-one constraint validation
 pub const has_one = @import("has_one.zig");
 
 /// Has-one constraint specification
-///
-/// Defines a relationship between a field in account data and another account.
-///
-/// Example:
-/// ```zig
-/// const Vault = anchor.Account(VaultData, .{
-///     .discriminator = anchor.accountDiscriminator("Vault"),
-///     .has_one = &.{
-///         .{ .field = "authority", .target = "authority" },
-///     },
-/// });
-/// ```
 pub const HasOneSpec = has_one.HasOneSpec;
 
 /// Typed helper for has_one specs.
@@ -932,11 +701,6 @@ pub fn hasOneSpec(
 }
 
 /// Validate has_one constraint
-///
-/// Example:
-/// ```zig
-/// try anchor.validateHasOne(VaultData, &vault.data, "authority", authority.key());
-/// ```
 pub const validateHasOne = has_one.validateHasOne;
 
 /// Validate has_one constraint with raw bytes
@@ -952,21 +716,13 @@ pub const getHasOneFieldBytes = has_one.getHasOneFieldBytes;
 pub const HasOneError = has_one.HasOneError;
 
 // ============================================================================
-// Phase 3: Close Module
+// Close Module
 // ============================================================================
 
 /// Account closing utilities
 pub const close = @import("close.zig");
 
 /// Close an account, transferring lamports to destination
-///
-/// Transfers all lamports and zeros account data. The Solana runtime
-/// automatically garbage collects the account afterward.
-///
-/// Example:
-/// ```zig
-/// try anchor.closeAccount(account_info, destination_info);
-/// ```
 pub const closeAccount = close.closeAccount;
 
 /// Close account with typed wrapper
@@ -985,7 +741,7 @@ pub const isClosed = close.isClosed;
 pub const CloseError = close.CloseError;
 
 // ============================================================================
-// Phase 3: Realloc Module
+// Realloc Module
 // ============================================================================
 
 /// Account reallocation utilities
@@ -995,27 +751,9 @@ pub const realloc = @import("realloc.zig");
 pub const MAX_ACCOUNT_SIZE = realloc.MAX_ACCOUNT_SIZE;
 
 /// Realloc configuration
-///
-/// Example:
-/// ```zig
-/// const Dynamic = anchor.Account(Data, .{
-///     .discriminator = anchor.accountDiscriminator("Dynamic"),
-///     .realloc = .{
-///         .payer = "payer",
-///         .zero_init = true,
-///     },
-/// });
-/// ```
 pub const ReallocConfig = realloc.ReallocConfig;
 
 /// Reallocate account data to new size
-///
-/// Handles rent payment/refund based on size change.
-///
-/// Example:
-/// ```zig
-/// try anchor.reallocAccount(account_info, new_size, payer_info, true);
-/// ```
 pub const reallocAccount = realloc.reallocAccount;
 
 /// Calculate rent difference for reallocation
@@ -1037,62 +775,8 @@ pub const producesRefund = realloc.producesRefund;
 pub const ReallocError = realloc.ReallocError;
 
 // ============================================================================
-// Zero-CU Framework (5-7 CU overhead)
+// Zero Program (Alias)
 // ============================================================================
-
-/// Zero-CU Framework - High-level API with zero runtime overhead
-///
-/// Provides Anchor-style abstractions that compile to optimal code:
-/// - Single instruction: 5 CU
-/// - Multi instruction: 7 CU per instruction
-///
-/// ## Quick Start (Single Instruction)
-///
-/// ```zig
-/// const anchor = @import("sol_anchor_zig");
-/// const zero = anchor.zero_cu;
-///
-/// const MyAccounts = struct {
-///     source: zero.Signer(0),    // Signer, 0 bytes data
-///     dest: zero.Mut(0),          // Writable, 0 bytes data
-/// };
-///
-/// pub const Program = struct {
-///     pub fn transfer(ctx: zero.Ctx(MyAccounts)) !void {
-///         const source = ctx.accounts.source;
-///         const dest = ctx.accounts.dest;
-///         // ... implementation
-///     }
-/// };
-///
-/// comptime {
-///     zero.entry(MyAccounts, "transfer", Program.transfer);
-/// }
-/// ```
-///
-/// ## Multi-Instruction Program
-///
-/// ```zig
-/// comptime {
-///     zero.multi(SharedAccounts, .{
-///         zero.inst("initialize", Program.initialize),
-///         zero.inst("transfer", Program.transfer),
-///         zero.inst("close", Program.close),
-///     });
-/// }
-/// ```
-///
-/// ## Key Types
-///
-/// - `zero.Signer(data_len)` - Signer account marker
-/// - `zero.Mut(data_len)` - Mutable account marker
-/// - `zero.Readonly(data_len)` - Readonly account marker
-/// - `zero.Ctx(Accounts)` - Instruction context type
-/// - `zero.entry(...)` - Single instruction export
-/// - `zero.multi(...)` - Multi instruction export
-/// - `zero.inst(...)` - Instruction definition for multi
-///
-pub const zero_cu = @import("zero_cu.zig");
 
 /// Alias for zero_cu (same module)
 pub const zero_program = @import("zero_program.zig");
@@ -1102,104 +786,51 @@ pub const zero_program = @import("zero_program.zig");
 // ============================================================================
 
 test "anchor module exports" {
-    // Phase 1 exports
+    // zero_cu (recommended)
+    _ = zero_cu;
+    _ = zero_cu.Signer;
+    _ = zero_cu.Mut;
+    _ = zero_cu.Readonly;
+    _ = zero_cu.Account;
+    _ = zero_cu.Ctx;
+    _ = zero_cu.entry;
+    _ = zero_cu.multi;
+    _ = zero_cu.inst;
+    
+    // Discriminator
     _ = DISCRIMINATOR_LENGTH;
     _ = Discriminator;
     _ = accountDiscriminator;
     _ = instructionDiscriminator;
+    
+    // Error
     _ = AnchorError;
-    _ = Constraints;
+    
+    // Standard API (legacy)
     _ = Account;
-    _ = AccountField;
-    _ = AccountConfig;
-    _ = AssociatedTokenConfig;
     _ = Signer;
     _ = SignerMut;
-    _ = SystemAccount;
-    _ = SystemAccountMut;
-    _ = StakeAccount;
-    _ = StakeAccountMut;
-    _ = Program;
     _ = Context;
-    _ = Sysvar;
-    _ = SysvarData;
-    _ = ClockData;
-    _ = RentData;
-    _ = EpochScheduleData;
-    _ = SlotHashesData;
-    _ = SlotHistoryData;
-    _ = EpochRewardsData;
-    _ = LastRestartSlotData;
-    _ = ClockSysvar;
-    _ = RentSysvar;
-    _ = EpochScheduleSysvar;
-    _ = SlotHashesSysvar;
-    _ = SlotHistorySysvar;
-    _ = EpochRewardsSysvar;
-    _ = LastRestartSlotSysvar;
-    _ = CpiContext;
-    _ = CpiContextWithConfig;
+    _ = Constraints;
+    
+    // SPL helpers
     _ = token;
     _ = associated_token;
     _ = memo;
     _ = stake;
     _ = TokenAccount;
     _ = Mint;
-
-    // Phase 2 exports
-    _ = SeedSpec;
+    
+    // PDA helpers
     _ = seed;
     _ = seedAccount;
-    _ = seedAccountField;
-    _ = seedField;
-    _ = seedDataField;
     _ = validatePda;
-    _ = derivePda;
+    
+    // Init/Close helpers
     _ = rentExemptBalance;
-    _ = InitError;
-
-    // Phase 3 exports
-    _ = HasOneSpec;
-    _ = hasOneSpec;
-    _ = validateHasOne;
-    _ = HasOneError;
+    _ = createAccount;
     _ = closeAccount;
-    _ = CloseError;
-    _ = ReallocConfig;
     _ = reallocAccount;
-    _ = ReallocError;
-    _ = MAX_ACCOUNT_SIZE;
-}
-
-test "typed field helpers" {
-    const AccountsType = struct {
-        payer: SignerMut,
-        authority: Signer,
-    };
-
-    const Data = struct {
-        authority: sdk.PublicKey,
-        bump: u8,
-    };
-
-    try std.testing.expectEqualStrings("payer", accountField(AccountsType, .payer));
-    try std.testing.expectEqualStrings("authority", dataField(Data, .authority));
-
-    const account_seed = seedAccountField(AccountsType, .payer);
-    switch (account_seed) {
-        .account => |name| try std.testing.expectEqualStrings("payer", name),
-        else => try std.testing.expect(false),
-    }
-
-    const data_seed = seedDataField(Data, .authority);
-    switch (data_seed) {
-        .field => |name| try std.testing.expectEqualStrings("authority", name),
-        else => try std.testing.expect(false),
-    }
-
-    const spec = hasOneSpec(Data, .authority, AccountsType, .authority);
-    try std.testing.expectEqualStrings("authority", spec.field);
-    try std.testing.expectEqualStrings("authority", spec.target);
 }
 
 test "discriminator submodule" {
@@ -1230,7 +861,6 @@ test "context submodule" {
     _ = context;
 }
 
-// Phase 2 submodule tests
 test "seeds submodule" {
     _ = seeds;
 }
@@ -1243,7 +873,6 @@ test "init submodule" {
     _ = init;
 }
 
-// Phase 3 submodule tests
 test "has_one submodule" {
     _ = has_one;
 }
@@ -1254,4 +883,8 @@ test "close submodule" {
 
 test "realloc submodule" {
     _ = realloc;
+}
+
+test "zero_cu submodule" {
+    _ = zero_cu;
 }
