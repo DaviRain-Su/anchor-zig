@@ -187,9 +187,6 @@ pub const writeIdlFile = idl_zero.writeJsonFile;
 /// Anchor IDL generation utilities (standard API, legacy)
 pub const idl = @import("idl.zig");
 
-/// Zig client code generation utilities
-pub const codegen = @import("codegen.zig");
-
 /// IDL config overrides (standard API)
 pub const IdlConfig = idl.IdlConfig;
 
@@ -199,62 +196,13 @@ pub const Instruction = idl.Instruction;
 /// Generate Anchor-compatible IDL JSON
 pub const generateIdlJson = idl.generateJson;
 
-/// Generate Zig client module source
-pub const generateZigClient = codegen.generateZigClient;
 
-// ============================================================================
-// AccountLoader (Zero-Copy) - Advanced
-// ============================================================================
 
-/// AccountLoader for zero-copy account access
-pub const account_loader = @import("account_loader.zig");
 
-/// AccountLoader config
-pub const AccountLoaderConfig = account_loader.AccountLoaderConfig;
 
-/// Zero-copy account loader type
-pub const AccountLoader = account_loader.AccountLoader;
 
-// ============================================================================
-// LazyAccount - Advanced
-// ============================================================================
 
-/// LazyAccount for on-demand deserialization
-pub const lazy_account = @import("lazy_account.zig");
 
-/// LazyAccount config
-pub const LazyAccountConfig = lazy_account.LazyAccountConfig;
-
-/// LazyAccount type
-pub const LazyAccount = lazy_account.LazyAccount;
-
-// ============================================================================
-// Program Entry (Standard API)
-// ============================================================================
-
-/// Program dispatch helpers (Anchor-style entry)
-pub const program_entry = @import("program_entry.zig");
-
-/// Typed program dispatcher
-pub const ProgramEntry = program_entry.ProgramEntry;
-
-/// Program dispatch configuration
-pub const DispatchConfig = program_entry.DispatchConfig;
-
-/// Fallback handler context
-pub const FallbackContext = program_entry.FallbackContext;
-
-// ============================================================================
-// Optimized Entry Point (Standard API)
-// ============================================================================
-
-/// Optimized entry point with tiered validation
-/// 
-/// Note: For best performance, use zero_cu instead.
-pub const optimized = @import("optimized.zig");
-
-/// Validation level for optimized entry
-pub const ValidationLevel = optimized.ValidationLevel;
 
 // ============================================================================
 // Interface + CPI Helpers
@@ -296,18 +244,7 @@ pub const AccountMetaOverride = interface.AccountMetaOverride;
 /// Interface CPI instruction builder
 pub const Interface = interface.Interface;
 
-// ============================================================================
-// CPI Context
-// ============================================================================
 
-/// CPI context builder
-pub const cpi_context = @import("cpi_context.zig");
-
-/// CPI context builder with default config
-pub const CpiContext = cpi_context.CpiContext;
-
-/// CPI context builder with custom interface config
-pub const CpiContextWithConfig = cpi_context.CpiContextWithConfig;
 
 // ============================================================================
 // SPL Program Integrations (Anchor-style)
@@ -842,12 +779,7 @@ pub const producesRefund = realloc.producesRefund;
 /// Account realloc errors
 pub const ReallocError = realloc.ReallocError;
 
-// ============================================================================
-// Zero Program (Alias)
-// ============================================================================
 
-/// Alias for zero_cu (same module)
-pub const zero_program = @import("zero_program.zig");
 
 // ============================================================================
 // Tests
