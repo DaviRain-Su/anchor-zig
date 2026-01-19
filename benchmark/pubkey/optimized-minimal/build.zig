@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const anchor_mod = anchor_dep.module("sol_anchor_zig");
 
     const program = b.addLibrary(.{
-        .name = "pubkey_unified",
+        .name = "optimized_minimal",
         .linkage = .dynamic,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),

@@ -1,26 +1,17 @@
-//! ZeroCU Single Instruction Example - Typed API
+//! ZeroCU Single Instruction
 //!
-//! Demonstrates zero_cu with typed account data.
-//! Result: 5 CU (same as raw Zig)
+//! Same logic as solana-program-rosetta/pubkey but with ZeroCU framework.
+//! Check if account id equals owner id.
 
 const anchor = @import("sol_anchor_zig");
 const zero = anchor.zero_cu;
 
 // ============================================================================
-// Account Data Type
-// ============================================================================
-
-/// Simple 1-byte marker data
-const MarkerData = struct {
-    value: u8,
-};
-
-// ============================================================================
-// Account Definition - Typed!
+// Account Definition
 // ============================================================================
 
 const CheckAccounts = struct {
-    target: zero.Readonly(MarkerData), // Typed as MarkerData
+    target: zero.Readonly(1), // 1 byte data (same as rosetta test)
 };
 
 // ============================================================================
@@ -28,18 +19,9 @@ const CheckAccounts = struct {
 // ============================================================================
 
 pub const Program = struct {
-    pub const id = anchor.sdk.PublicKey.comptimeFromBase58(
-        "PubkeyComp111111111111111111111111111111111"
-    );
-
     /// Check if account id equals owner id
     pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
         const target = ctx.accounts.target;
-
-        // Can access typed data if needed
-        _ = target.get().value;
-
-        // Original comparison
         if (!target.id().equals(target.ownerId().*)) {
             return error.InvalidKey;
         }
@@ -47,7 +29,7 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Single-line entrypoint export (5 CU)
+// Single instruction export
 // ============================================================================
 
 comptime {

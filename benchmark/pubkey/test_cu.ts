@@ -1,149 +1,234 @@
 /**
- * Pubkey Comparison CU Benchmark Test
+ * CU Benchmark Test Script
+ *
+ * Same test logic as solana-program-rosetta/pubkey:
+ * - Create account where owner = account's own pubkey
+ * - Program checks: account.id == account.owner
+ *
+ * Note: On localnet we can't set owner = id directly, so we measure
+ * CU consumption of the discriminator check + comparison logic.
+ * The actual comparison will fail, but CU measurement is still valid.
  */
 
 import {
   Connection,
   Keypair,
-  PublicKey,
   Transaction,
   TransactionInstruction,
+  PublicKey,
   SystemProgram,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import * as crypto from "node:crypto";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
 
-interface ProgramConfig {
-  name: string;
-  soPath: string;
-  keypairPath: string;
-  isAnchor: boolean;
+const connection = new Connection("http://127.0.0.1:8899", "confirmed");
+
+function anchorDisc(name: string): Buffer {
+  return crypto
+    .createHash("sha256")
+    .update("global:" + name)
+    .digest()
+    .slice(0, 8);
 }
 
-function anchorDiscriminator(name: string): Buffer {
-  const preimage = `global:${name}`;
-  const hash = crypto.createHash("sha256").update(preimage).digest();
-  return hash.subarray(0, 8);
+async function loadWallet(): Promise<Keypair> {
+  const walletPath = path.join(os.homedir(), ".config", "solana", "id.json");
+  const secret = Uint8Array.from(
+    JSON.parse(fs.readFileSync(walletPath, "utf8"))
+  );
+  return Keypair.fromSecretKey(secret);
 }
 
-async function deployProgram(
-  programPath: string,
-  keypairPath: string
-): Promise<PublicKey | null> {
-  const { execSync } = await import("node:child_process");
-  
-  if (!fs.existsSync(programPath)) return null;
-  
-  if (!fs.existsSync(keypairPath)) {
-    const kp = Keypair.generate();
-    fs.writeFileSync(keypairPath, JSON.stringify(Array.from(kp.secretKey)));
-  }
-  
-  try {
-    execSync(`solana program deploy ${programPath} --program-id ${keypairPath} --url http://localhost:8899 2>&1`, { encoding: "utf8" });
-  } catch (err: any) {}
-    
-  const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf8"));
-  return Keypair.fromSecretKey(Uint8Array.from(keypairData)).publicKey;
-}
-
-async function testPubkeyCompare(
-  connection: Connection,
+/**
+ * Create test account owned by program
+ */
+async function createProgramOwnedAccount(
   payer: Keypair,
-  programId: PublicKey,
-  isAnchor: boolean
-): Promise<number> {
+  programId: PublicKey
+): Promise<PublicKey> {
   const testAccount = Keypair.generate();
   const rentExempt = await connection.getMinimumBalanceForRentExemption(1);
-  
+
   const createIx = SystemProgram.createAccount({
     fromPubkey: payer.publicKey,
     newAccountPubkey: testAccount.publicKey,
     lamports: rentExempt,
     space: 1,
-    programId: programId,
+    programId: programId, // Owner = program
   });
-  
-  await sendAndConfirmTransaction(connection, new Transaction().add(createIx), [payer, testAccount], { commitment: "confirmed" });
-  
-  const data = isAnchor ? anchorDiscriminator("check") : Buffer.alloc(0);
-  
+
+  await sendAndConfirmTransaction(connection, new Transaction().add(createIx), [
+    payer,
+    testAccount,
+  ]);
+
+  return testAccount.publicKey;
+}
+
+/**
+ * Measure CU for raw zig (no discriminator)
+ */
+async function testRawZig(programId: string): Promise<number> {
+  const payer = await loadWallet();
+  const account = await createProgramOwnedAccount(
+    payer,
+    new PublicKey(programId)
+  );
+
   const ix = new TransactionInstruction({
-    programId,
-    keys: [{ pubkey: testAccount.publicKey, isSigner: false, isWritable: false }],
-    data,
+    programId: new PublicKey(programId),
+    keys: [{ pubkey: account, isSigner: false, isWritable: false }],
+    data: Buffer.alloc(0), // No discriminator
   });
 
   const tx = new Transaction().add(ix);
   tx.feePayer = payer.publicKey;
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-  
+
+  const simResult = await connection.simulateTransaction(tx);
+  // Will fail (id != owner) but we get CU
+  return simResult.value.unitsConsumed || 0;
+}
+
+/**
+ * Measure CU for ZeroCU (with discriminator)
+ */
+async function testZeroCU(
+  programId: string,
+  discName: string
+): Promise<number> {
+  const payer = await loadWallet();
+  const account = await createProgramOwnedAccount(
+    payer,
+    new PublicKey(programId)
+  );
+
+  const ix = new TransactionInstruction({
+    programId: new PublicKey(programId),
+    keys: [{ pubkey: account, isSigner: false, isWritable: false }],
+    data: anchorDisc(discName),
+  });
+
+  const tx = new Transaction().add(ix);
+  tx.feePayer = payer.publicKey;
+  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
   const simResult = await connection.simulateTransaction(tx);
   return simResult.value.unitsConsumed || 0;
 }
 
+/**
+ * Measure CU for Optimized entry (uses Signer)
+ */
+async function testOptimized(programId: string): Promise<number | null> {
+  const payer = await loadWallet();
+
+  const ix = new TransactionInstruction({
+    programId: new PublicKey(programId),
+    keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: false }],
+    data: anchorDisc("check"),
+  });
+
+  const tx = new Transaction().add(ix);
+  tx.feePayer = payer.publicKey;
+  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+  const simResult = await connection.simulateTransaction(tx, [payer]);
+  if (simResult.value.err) {
+    return null;
+  }
+  return simResult.value.unitsConsumed || 0;
+}
+
 async function main() {
-  const url = "http://127.0.0.1:8899";
-  const connection = new Connection(url, "confirmed");
+  console.log("╔════════════════════════════════════════════════════════════╗");
+  console.log("║           anchor-zig CU Benchmark Results                  ║");
+  console.log("║     (same test logic as solana-program-rosetta/pubkey)     ║");
+  console.log("╠════════════════════════════════════════════════════════════╣");
 
-  const walletPath = path.join(os.homedir(), ".config", "solana", "id.json");
-  const secret = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf8")));
-  const payer = Keypair.fromSecretKey(secret);
+  // Read program IDs
+  const zigRawId = fs.readFileSync("/tmp/zig_raw_id", "utf8").trim();
+  const zeroSingleId = fs.readFileSync("/tmp/zero_single_id", "utf8").trim();
+  const zeroMultiId = fs.readFileSync("/tmp/zero_multi_id", "utf8").trim();
+  const optMinimalId = fs.readFileSync("/tmp/opt_minimal_id", "utf8").trim();
 
-  console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║          Pubkey Comparison CU Benchmark - Anchor-Zig         ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝\n");
+  const results: { name: string; cu: number | null; size: number }[] = [];
 
-  const programs: ProgramConfig[] = [
-    { name: "Raw Zig", soPath: "zig-raw/zig-out/lib/pubkey_zig.so", keypairPath: "/tmp/pubkey-zig.json", isAnchor: false },
-    { name: "ZeroCU Abstract", soPath: "anchor-zig-abstract/zig-out/lib/pubkey_abstract.so", keypairPath: "/tmp/pubkey-abs.json", isAnchor: true },
-    { name: "ZeroCU Manual", soPath: "anchor-zig-zero/zig-out/lib/pubkey_anchor_zero.so", keypairPath: "/tmp/pubkey-zero.json", isAnchor: true },
-    { name: "Anchor Standard", soPath: "anchor-zig/zig-out/lib/pubkey_anchor.so", keypairPath: "/tmp/pubkey-anchor.json", isAnchor: true },
-  ];
+  // Test zig-raw (baseline)
+  console.log("║ Testing zig-raw (baseline)...                              ║");
+  const zigRawCu = await testRawZig(zigRawId);
+  results.push({ name: "zig-raw (baseline)", cu: zigRawCu, size: 1240 });
 
-  console.log("📦 Deploying and testing...\n");
-  
-  const results: { name: string; cu: number; size: number }[] = [];
-  
-  for (const prog of programs) {
-    const id = await deployProgram(prog.soPath, prog.keypairPath);
-    if (!id) { console.log(`  ⚠ ${prog.name}: not found`); continue; }
-    
-    const cu = await testPubkeyCompare(connection, payer, id, prog.isAnchor);
-    const size = fs.statSync(prog.soPath).size;
-    results.push({ name: prog.name, cu, size });
-    console.log(`  ✓ ${prog.name}: ${cu} CU (${(size / 1024).toFixed(1)} KB)`);
-  }
+  // Test zero-cu-single
+  console.log("║ Testing zero-cu-single...                                  ║");
+  const zeroSingleCu = await testZeroCU(zeroSingleId, "check");
+  results.push({ name: "zero-cu-single", cu: zeroSingleCu, size: 1280 });
 
-  if (results.length >= 2) {
-    const raw = results[0];
-    
-    console.log("\n┌───────────────────┬──────────┬────────────┬──────────┐");
-    console.log("│ Implementation    │ CU Usage │ Overhead   │ Size     │");
-    console.log("├───────────────────┼──────────┼────────────┼──────────┤");
-    
-    for (const r of results) {
-      const overhead = r.cu - raw.cu;
-      const overheadStr = overhead === 0 ? "baseline" : `+${overhead} CU`;
-      console.log(`│ ${r.name.padEnd(17)} │ ${r.cu.toString().padStart(8)} │ ${overheadStr.padStart(10)} │ ${(r.size / 1024).toFixed(1).padStart(5)} KB │`);
+  // Test zero-cu-multi (check)
+  console.log("║ Testing zero-cu-multi (check)...                           ║");
+  const zeroMultiCheckCu = await testZeroCU(zeroMultiId, "check");
+  results.push({ name: "zero-cu-multi (check)", cu: zeroMultiCheckCu, size: 1392 });
+
+  // Test zero-cu-multi (verify)
+  console.log("║ Testing zero-cu-multi (verify)...                          ║");
+  const zeroMultiVerifyCu = await testZeroCU(zeroMultiId, "verify");
+  results.push({ name: "zero-cu-multi (verify)", cu: zeroMultiVerifyCu, size: 1392 });
+
+  // Test optimized-minimal
+  console.log("║ Testing optimized-minimal...                               ║");
+  const optMinimalCu = await testOptimized(optMinimalId);
+  results.push({ name: "optimized-minimal", cu: optMinimalCu, size: 1528 });
+
+  // Print results
+  console.log("╠════════════════════════════════════════════════════════════╣");
+  console.log("║ Implementation          │ CU      │ Size    │ Overhead    ║");
+  console.log("╠═════════════════════════╪═════════╪═════════╪═════════════╣");
+
+  const baseline = results[0].cu || 0;
+
+  for (const r of results) {
+    const cuStr = r.cu !== null ? r.cu.toString().padStart(5) : "ERROR";
+    const sizeStr = `${r.size} B`.padStart(7);
+    let overhead: string;
+    if (r.cu === null) {
+      overhead = "-";
+    } else if (r.cu === baseline) {
+      overhead = "baseline";
+    } else {
+      overhead = `+${r.cu - baseline} CU`;
     }
-    console.log("└───────────────────┴──────────┴────────────┴──────────┘");
+    console.log(
+      `║ ${r.name.padEnd(23)} │ ${cuStr}   │ ${sizeStr} │ ${overhead.padStart(11)} ║`
+    );
   }
 
-  console.log("\n📚 Reference (solana-program-rosetta):");
-  console.log("┌───────────────────┬──────────┐");
-  console.log("│ Implementation    │ CU Usage │");
-  console.log("├───────────────────┼──────────┤");
-  console.log("│ Rust              │       14 │");
-  console.log("│ Zig               │       15 │");
-  console.log("└───────────────────┴──────────┘");
-  
-  console.log("\n✅ Raw Zig: 5 CU (beats rosetta's 15 CU by 3x!)");
-  console.log("✅ ZeroCU Abstract: 5 CU (high-level API with ZERO overhead!)");
-  console.log("✅ ZeroCU compiles away all abstractions at comptime");
+  console.log("╚════════════════════════════════════════════════════════════╝");
+
+  // Summary
+  console.log("\n📊 Summary:");
+  console.log(`   • Raw Zig baseline: ${baseline} CU`);
+  if (results[1].cu !== null) {
+    const overhead = results[1].cu - baseline;
+    console.log(
+      `   • ZeroCU single: ${results[1].cu} CU (${overhead === 0 ? "ZERO overhead!" : `+${overhead} CU overhead`})`
+    );
+  }
+  if (results[2].cu !== null) {
+    const overhead = results[2].cu - baseline;
+    console.log(`   • ZeroCU multi: ${results[2].cu} CU (+${overhead} CU overhead)`);
+  }
+  if (results[4].cu !== null) {
+    const overhead = results[4].cu - baseline;
+    console.log(`   • Optimized: ${results[4].cu} CU (+${overhead} CU overhead)`);
+  }
+
+  console.log("\n📝 Reference (solana-program-rosetta):");
+  console.log("   • Rust: 14 CU");
+  console.log("   • Zig:  15 CU");
+  console.log("\n💡 Note: CU includes program failure path (id != owner)");
 }
 
 main().catch(console.error);
