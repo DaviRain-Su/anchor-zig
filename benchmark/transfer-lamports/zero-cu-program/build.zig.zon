@@ -1,0 +1,17 @@
+.{
+    .name = .transfer_program,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0x2d5805cf1a89f736,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .path = "../../../../solana-program-sdk-zig",
+        },
+        .sol_anchor_zig = .{ .path = "../../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
