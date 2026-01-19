@@ -271,6 +271,116 @@ pub fn transfer(
     }
 }
 
+/// Transfer tokens via CPI with PDA signer (comptime seeds)
+///
+/// Use this when the authority is a PDA that needs to sign.
+/// The signer_seeds are used to derive the PDA signature.
+///
+/// Example:
+/// ```zig
+/// try spl.token.transferSignedSeeds(
+///     source,
+///     destination,
+///     authority_pda,
+///     amount,
+///     .{ "vault", mint_bytes },
+///     bump,
+/// );
+/// ```
+pub fn transferSignedSeeds(
+    source: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    comptime seeds: anytype,
+    bump: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    var data: [9]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.Transfer);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, destination, authority };
+
+    // Build signer seeds with bump
+    const bump_slice: [1]u8 = .{bump};
+    const SeedsType = @TypeOf(seeds);
+    const fields = @typeInfo(SeedsType).@"struct".fields;
+    var full_seeds: [fields.len + 1][]const u8 = undefined;
+    
+    inline for (fields, 0..) |field, i| {
+        full_seeds[i] = @field(seeds, field.name);
+    }
+    full_seeds[fields.len] = &bump_slice;
+
+    const signer_seeds = [_][]const []const u8{&full_seeds};
+
+    if (ix.invokeSigned(&account_infos, &signer_seeds)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Transfer tokens via CPI with PDA signer (runtime seeds slice)
+///
+/// Use when seeds are not known at comptime.
+/// Supports up to 4 seeds (plus bump).
+pub fn transferSigned(
+    source: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    seeds: []const []const u8,
+    bump: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    var data: [9]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.Transfer);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, destination, authority };
+
+    // Build signer seeds with bump (max 5 seeds = 4 + bump)
+    const bump_slice: [1]u8 = .{bump};
+    var full_seeds: [5][]const u8 = undefined;
+    const seed_count = @min(seeds.len, 4);
+    for (0..seed_count) |i| {
+        full_seeds[i] = seeds[i];
+    }
+    full_seeds[seed_count] = &bump_slice;
+
+    // Create slice of correct length
+    const signer_seed_slice = full_seeds[0 .. seed_count + 1];
+    const signer_seeds = [_][]const []const u8{signer_seed_slice};
+
+    if (ix.invokeSigned(&account_infos, &signer_seeds)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
 /// Mint tokens via CPI
 pub fn mintTo(
     mint: AccountInfo,
