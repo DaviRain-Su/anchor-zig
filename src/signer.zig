@@ -38,6 +38,12 @@ pub const Signer = struct {
     /// The account info
     info: *const AccountInfo,
 
+    /// Whether this account must be mutable
+    pub const HAS_MUT = false;
+
+    /// Whether this account must be a signer
+    pub const HAS_SIGNER = true;
+
     /// Load and validate a signer account
     ///
     /// Returns error if account is not a signer.
@@ -79,14 +85,22 @@ pub const SignerMut = struct {
     /// The account info
     info: *const AccountInfo,
 
+    /// Whether this account must be mutable
+    pub const HAS_MUT = true;
+
+    /// Whether this account must be a signer
+    pub const HAS_SIGNER = true;
+
     /// Load and validate a mutable signer account
     ///
     /// Returns error if account is not a signer or not writable.
+    /// Uses combined check for slightly better performance.
     pub fn load(info: *const AccountInfo) !SignerMut {
-        if (info.is_signer == 0) {
-            return error.ConstraintSigner;
-        }
-        if (info.is_writable == 0) {
+        // Combined check: both signer and writable flags must be set
+        if ((info.is_signer & info.is_writable) == 0) {
+            if (info.is_signer == 0) {
+                return error.ConstraintSigner;
+            }
             return error.ConstraintMut;
         }
 

@@ -56,6 +56,8 @@ pub fn ProgramEntry(comptime Program: type) type {
         }
 
         /// Dispatch instruction data to the matching handler with custom config.
+        ///
+        /// Uses fast u64 discriminator comparison for efficient instruction matching.
         pub fn dispatchWithConfig(
             program_id: *const PublicKey,
             accounts: []const AccountInfo,
@@ -66,13 +68,17 @@ pub fn ProgramEntry(comptime Program: type) type {
                 return DispatchError.InstructionMissing;
             }
 
-            const disc = data[0..discriminator_mod.DISCRIMINATOR_LENGTH];
+            // Fast discriminator extraction as u64
+            const disc_u64: u64 = @bitCast(data[0..8].*);
 
+            // Inline dispatch with u64 comparison (compiler optimizes to jump table)
             inline for (@typeInfo(Program.instructions).@"struct".decls) |decl| {
                 const InstructionType = @field(Program.instructions, decl.name);
                 if (@TypeOf(InstructionType) == type) {
-                    const expected = discriminator_mod.instructionDiscriminator(decl.name);
-                    if (std.mem.eql(u8, disc, &expected)) {
+                    const expected = comptime discriminator_mod.instructionDiscriminator(decl.name);
+                    const expected_u64: u64 = comptime discriminator_mod.discriminatorToU64(expected);
+
+                    if (disc_u64 == expected_u64) {
                         if (!@hasDecl(Program, decl.name)) {
                             @compileError("Program is missing handler for instruction: " ++ decl.name);
                         }

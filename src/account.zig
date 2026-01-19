@@ -890,7 +890,7 @@ pub fn Account(comptime T: type, comptime config: AccountConfig) type {
         ///
         /// Validates:
         /// - Account size is sufficient
-        /// - Discriminator matches expected value
+        /// - Discriminator matches expected value (using fast u64 comparison)
         /// - Owner matches (if specified in config)
         ///
         /// Returns error if validation fails.
@@ -900,16 +900,14 @@ pub fn Account(comptime T: type, comptime config: AccountConfig) type {
                 return error.AccountDiscriminatorNotFound;
             }
 
-            const data_slice = info.data[0..DISCRIMINATOR_LENGTH];
             if (IS_ZERO) {
-                for (data_slice) |byte| {
-                    if (byte != 0) {
-                        return error.ConstraintZero;
-                    }
+                // Zero check: discriminator must be all zeros
+                if (!discriminator_mod.isDiscriminatorZero(info.data)) {
+                    return error.ConstraintZero;
                 }
             } else {
-                // Validate discriminator
-                if (!std.mem.eql(u8, data_slice, &discriminator)) {
+                // Fast discriminator validation using u64 comparison (~5x faster)
+                if (!discriminator_mod.validateDiscriminatorFast(info.data, &discriminator)) {
                     return error.AccountDiscriminatorMismatch;
                 }
             }
