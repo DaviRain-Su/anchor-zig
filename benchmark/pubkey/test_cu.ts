@@ -1,14 +1,13 @@
 /**
  * CU Benchmark Test Script
  *
- * Same test logic as solana-program-rosetta/pubkey:
- * - Create account owned by program
- * - Check if account.id == account.owner
+ * Same test logic as solana-program-rosetta/pubkey.
  *
  * Benchmarks:
- * - zig-raw:        Raw Zig baseline (no framework)
- * - zero-cu-single: zero_cu single instruction
- * - zero-cu-multi:  zero_cu multi-instruction
+ * - zig-raw:          Raw Zig baseline (no framework)
+ * - zero-cu-single:   zero_cu single instruction (no validation)
+ * - zero-cu-multi:    zero_cu multi-instruction (no validation)
+ * - zero-cu-validated: zero_cu with owner constraint validation
  */
 
 import {
@@ -113,13 +112,21 @@ async function testWithDisc(
 }
 
 function deployProgram(soPath: string): string {
-  const result = execSync(`solana program deploy ${soPath} 2>&1`).toString();
-  const match = result.match(/Program Id: (\w+)/);
-  return match ? match[1] : "";
+  try {
+    const result = execSync(`solana program deploy ${soPath} 2>&1`).toString();
+    const match = result.match(/Program Id: (\w+)/);
+    return match ? match[1] : "";
+  } catch {
+    return "";
+  }
 }
 
 function getFileSize(filePath: string): number {
-  return fs.statSync(filePath).size;
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
 }
 
 async function main() {
@@ -128,61 +135,53 @@ async function main() {
   console.log("║     (same test logic as solana-program-rosetta/pubkey)     ║");
   console.log("╠════════════════════════════════════════════════════════════╣");
 
-  const results: { name: string; cu: number; size: number }[] = [];
+  interface Result {
+    name: string;
+    cu: number;
+    size: number;
+  }
 
-  // Deploy all programs
-  console.log("║ Deploying programs...                                      ║");
+  const results: Result[] = [];
 
-  const zigRawPath = "zig-raw/zig-out/lib/pubkey_zig.so";
-  const zeroSinglePath = "zero-cu-single/zig-out/lib/zero_cu_single.so";
-  const zeroMultiPath = "zero-cu-multi/zig-out/lib/zero_cu_multi.so";
+  // Programs to test
+  const programs = [
+    { name: "zig-raw (baseline)", path: "zig-raw/zig-out/lib/pubkey_zig.so", disc: null },
+    { name: "zero-cu-single", path: "zero-cu-single/zig-out/lib/zero_cu_single.so", disc: "check" },
+    { name: "zero-cu-multi", path: "zero-cu-multi/zig-out/lib/zero_cu_multi.so", disc: "check" },
+    { name: "zero-cu-validated", path: "zero-cu-validated/zig-out/lib/zero_cu_validated.so", disc: "check" },
+  ];
 
-  const zigRawId = deployProgram(zigRawPath);
-  const zeroSingleId = deployProgram(zeroSinglePath);
-  const zeroMultiId = deployProgram(zeroMultiPath);
+  console.log("║ Deploying and testing programs...                          ║");
 
-  // Test zig-raw (baseline)
-  console.log("║ Testing zig-raw (baseline)...                              ║");
-  const zigRawCu = await testRawZig(zigRawId);
-  results.push({
-    name: "zig-raw (baseline)",
-    cu: zigRawCu,
-    size: getFileSize(zigRawPath),
-  });
+  for (const prog of programs) {
+    const size = getFileSize(prog.path);
+    if (size === 0) {
+      console.log(`║ Skipping ${prog.name} (not built)                          ║`);
+      continue;
+    }
 
-  // Test zero-cu-single
-  console.log("║ Testing zero-cu-single...                                  ║");
-  const zeroSingleCu = await testWithDisc(zeroSingleId, "check");
-  results.push({
-    name: "zero-cu-single",
-    cu: zeroSingleCu,
-    size: getFileSize(zeroSinglePath),
-  });
+    const id = deployProgram(prog.path);
+    if (!id) {
+      console.log(`║ Failed to deploy ${prog.name}                              ║`);
+      continue;
+    }
 
-  // Test zero-cu-multi (check)
-  console.log("║ Testing zero-cu-multi (check)...                           ║");
-  const zeroMultiCheckCu = await testWithDisc(zeroMultiId, "check");
-  results.push({
-    name: "zero-cu-multi (check)",
-    cu: zeroMultiCheckCu,
-    size: getFileSize(zeroMultiPath),
-  });
+    let cu: number;
+    if (prog.disc === null) {
+      cu = await testRawZig(id);
+    } else {
+      cu = await testWithDisc(id, prog.disc);
+    }
 
-  // Test zero-cu-multi (verify)
-  console.log("║ Testing zero-cu-multi (verify)...                          ║");
-  const zeroMultiVerifyCu = await testWithDisc(zeroMultiId, "verify");
-  results.push({
-    name: "zero-cu-multi (verify)",
-    cu: zeroMultiVerifyCu,
-    size: getFileSize(zeroMultiPath),
-  });
+    results.push({ name: prog.name, cu, size });
+  }
 
   // Print results
   console.log("╠════════════════════════════════════════════════════════════╣");
   console.log("║ Implementation          │ CU      │ Size    │ Overhead    ║");
   console.log("╠═════════════════════════╪═════════╪═════════╪═════════════╣");
 
-  const baseline = results[0].cu;
+  const baseline = results[0]?.cu || 0;
 
   for (const r of results) {
     const cuStr = r.cu.toString().padStart(5);
@@ -203,10 +202,13 @@ async function main() {
   // Summary
   console.log("\n📊 Summary:");
   console.log(`   • Raw Zig baseline: ${baseline} CU`);
-  console.log(
-    `   • zero-cu-single: ${results[1].cu} CU (${results[1].cu === baseline ? "ZERO overhead!" : `+${results[1].cu - baseline} CU`})`
-  );
-  console.log(`   • zero-cu-multi: ${results[2].cu} CU (+${results[2].cu - baseline} CU)`);
+  for (let i = 1; i < results.length; i++) {
+    const r = results[i];
+    const overhead = r.cu - baseline;
+    console.log(
+      `   • ${r.name}: ${r.cu} CU (${overhead === 0 ? "ZERO overhead!" : `+${overhead} CU`})`
+    );
+  }
 
   console.log("\n📝 Reference (solana-program-rosetta):");
   console.log("   • Rust: 14 CU");

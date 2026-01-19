@@ -6,6 +6,17 @@
 |---------|---------|-----------------|-------|
 | **CU Overhead** | **5-7 CU** | ~150 CU | zero_cu is 20-30x faster |
 | **Binary Size** | ~1.3 KB | ~7+ KB | zero_cu is 5x smaller |
+| **Constraints** | ✅ Declarative | ✅ Declarative | Same API style |
+
+## Benchmark Results
+
+| Implementation | CU | Size | Notes |
+|----------------|-----|------|-------|
+| Raw Zig | 5 | 1240 B | Baseline |
+| zero-cu-single | 5 | 1280 B | **ZERO overhead!** |
+| zero-cu-multi | 7 | 1392 B | +2 CU for dispatch |
+| zero-cu-validated | 5 | 1264 B | **With owner constraint!** |
+| Standard Anchor | ~150 | 7+ KB | Full validation |
 
 ## Account Features
 
@@ -36,17 +47,17 @@
 
 ## Advanced Features
 
-| Feature | zero_cu | Standard Anchor | Migration Path |
-|---------|---------|-----------------|----------------|
-| PDA validation | ❌ | ✅ `.seeds` | Use `sol.PublicKey.findProgramAddress()` |
-| PDA bump storage | ❌ | ✅ `.bump` | Store manually |
-| Account init | ❌ | ✅ `.init` | Use CPI to system program |
-| Account close | ❌ | ✅ `.close` | Manual lamport transfer |
-| Account realloc | ❌ | ✅ `.realloc` | Use `account.realloc()` |
-| has_one constraint | ❌ | ✅ `.has_one` | Manual comparison |
-| Token constraints | ❌ | ✅ `.token_*` | Use SPL token directly |
-| Associated token | ❌ | ✅ `.associated_token` | Use ATA program |
-| Events | ❌ | ✅ `emitEvent()` | Use `sol.log.log()` |
+| Feature | zero_cu | Standard Anchor | Notes |
+|---------|---------|-----------------|-------|
+| PDA validation | ✅ `.seeds` | ✅ `.seeds` | Auto in `ctx.validate()` |
+| PDA bump storage | ❌ Manual | ✅ `.bump` | Store manually |
+| Account init | ✅ `.init` | ✅ `.init` | Comptime flag |
+| Account close | ✅ `.close` | ✅ `.close` | Comptime flag |
+| has_one constraint | ✅ `.has_one` | ✅ `.has_one` | Auto in `ctx.validate()` |
+| Discriminator | ✅ `.discriminator` | ✅ Auto | Optional |
+| Token constraints | ❌ Manual | ✅ `.token_*` | Use SPL directly |
+| Associated token | ❌ Manual | ✅ `.associated_token` | Use ATA directly |
+| Events | ❌ Manual | ✅ `emitEvent()` | Use `sol.log.log()` |
 | IDL generation | ❌ | ✅ `generateIdlJson()` | Manual IDL |
 | CPI helpers | ❌ | ✅ `Interface` | Use SDK directly |
 

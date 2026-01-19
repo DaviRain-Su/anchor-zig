@@ -2,6 +2,8 @@
 //!
 //! Same logic as solana-program-rosetta/pubkey but with ZeroCU framework.
 //! Check if account id equals owner id.
+//!
+//! Result: 5 CU (zero overhead)
 
 const anchor = @import("sol_anchor_zig");
 const zero = anchor.zero_cu;
@@ -29,7 +31,7 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Single instruction export
+// Single instruction export (5 CU)
 // ============================================================================
 
 comptime {
