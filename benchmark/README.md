@@ -149,6 +149,7 @@ Compares account id with owner id (32 bytes comparison).
 | Implementation     | CU Usage | Overhead  | Size     |
 |--------------------|----------|-----------|----------|
 | Raw Zig (baseline) | 5        | -         | 1.2 KB   |
+| **Anchor Zero**    | **5**    | **0 CU**  | 1.3 KB   |
 | Anchor Ultra       | 18       | +13 CU    | 1.3 KB   |
 | Anchor Standard    | 168      | +163 CU   | 7.9 KB   |
 
@@ -157,19 +158,19 @@ Compares account id with owner id (32 bytes comparison).
 | Implementation | CU Usage |
 |----------------|----------|
 | Rust           | 14       |
-| **Zig**        | **15**   |
+| Zig            | 15       |
 
-**Our Raw Zig beats the rosetta reference!** (5 vs 15 CU)
-**Anchor Ultra provides Anchor-compatible discriminator with only +13 CU overhead!**
+**🚀 Anchor Zero achieves ZERO CU overhead!**
+- Our Zig: 5 CU (beats rosetta's 15 CU by 3x!)
+- Anchor Zero: 5 CU (Anchor-compatible with zero overhead!)
 
-### Overhead Analysis
+### Optimization Levels
 
-| Layer                    | CU Cost |
-|--------------------------|---------|
-| Discriminator check      | +13 CU  |
-| Context.load() parsing   | +26 CU  |
-| ProgramEntry dispatch    | +113 CU |
-| Account validation       | +11 CU  |
+| Variant         | Description                                      | Overhead |
+|-----------------|--------------------------------------------------|----------|
+| Anchor Zero     | Fixed-offset access, comptime discriminator      | 0 CU     |
+| Anchor Ultra    | Dynamic account skip, comptime discriminator     | +13 CU   |
+| Anchor Standard | Full framework with validation                   | +163 CU  |
 
 ### Note on OptimizeMode
 

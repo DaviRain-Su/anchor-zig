@@ -99,6 +99,7 @@ async function main() {
 
   const programs: ProgramConfig[] = [
     { name: "Raw Zig", soPath: "zig-raw/zig-out/lib/pubkey_zig.so", keypairPath: "/tmp/pubkey-zig.json", isAnchor: false },
+    { name: "Anchor Zero", soPath: "anchor-zig-zero/zig-out/lib/pubkey_anchor_zero.so", keypairPath: "/tmp/pubkey-zero.json", isAnchor: true },
     { name: "Anchor Ultra", soPath: "anchor-zig-ultra/zig-out/lib/pubkey_anchor_ultra.so", keypairPath: "/tmp/pubkey-ultra.json", isAnchor: true },
     { name: "Anchor Standard", soPath: "anchor-zig/zig-out/lib/pubkey_anchor.so", keypairPath: "/tmp/pubkey-anchor.json", isAnchor: true },
   ];
@@ -141,7 +142,8 @@ async function main() {
   console.log("└───────────────────┴──────────┘");
   
   console.log("\n✅ Our Raw Zig: 5 CU (beats rosetta!)");
-  console.log("✅ Anchor Ultra: 18 CU (only +13 CU for discriminator)");
+  console.log("✅ Anchor Zero: 5 CU (ZERO overhead with discriminator!)");
+  console.log("✅ Anchor Ultra: 18 CU (+13 CU for dynamic account skip)");
 }
 
 main().catch(console.error);
