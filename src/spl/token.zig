@@ -226,7 +226,13 @@ pub const Program = struct {
 // CPI Helpers
 // ============================================================================
 
-// CPI helpers are defined below as generic functions
+// ============================================================================
+// CPI Helpers using Instruction.invoke
+// ============================================================================
+
+const Instruction = sol.instruction.Instruction;
+const AccountInfo = sol.account.Account.Info;
+const AccountParam = sol.account.Account.Param;
 
 /// Transfer tokens via CPI
 pub fn transfer(
@@ -235,26 +241,37 @@ pub fn transfer(
     authority: Account,
     amount: u64,
 ) !void {
-    const account_metas = [_]AccountMeta{
-        .{ .pubkey = source.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = destination.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = authority.id(), .is_writable = false, .is_signer = true },
+    // Build account params for CPI
+    const account_params = [_]AccountParam{
+        .{ .id = &source.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
     };
 
+    // Build instruction data
     var data: [9]u8 = undefined;
     data[0] = @intFromEnum(TokenInstruction.Transfer);
     std.mem.writeInt(u64, data[1..9], amount, .little);
 
-    const account_infos = [_]Account{ source, destination, authority };
+    // Create CPI instruction
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
 
-    sol.invoke.invoke(
-        &.{
-            .program_id = &TOKEN_PROGRAM_ID,
-            .accounts = &account_metas,
-            .data = &data,
-        },
-        &account_infos,
-    ) catch return error.CpiFailed;
+    // Build account infos for invoke
+    const account_infos = [_]AccountInfo{
+        source.info(),
+        destination.info(),
+        authority.info(),
+    };
+
+    // Invoke SPL Token Program
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
 }
 
 /// Mint tokens via CPI
@@ -264,26 +281,32 @@ pub fn mintTo(
     authority: Account,
     amount: u64,
 ) !void {
-    const account_metas = [_]AccountMeta{
-        .{ .pubkey = mint.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = destination.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = authority.id(), .is_writable = false, .is_signer = true },
+    const account_params = [_]AccountParam{
+        .{ .id = &mint.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
     };
 
     var data: [9]u8 = undefined;
     data[0] = @intFromEnum(TokenInstruction.MintTo);
     std.mem.writeInt(u64, data[1..9], amount, .little);
 
-    const account_infos = [_]Account{ mint, destination, authority };
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
 
-    sol.invoke.invoke(
-        &.{
-            .program_id = &TOKEN_PROGRAM_ID,
-            .accounts = &account_metas,
-            .data = &data,
-        },
-        &account_infos,
-    ) catch return error.CpiFailed;
+    const account_infos = [_]AccountInfo{
+        mint.info(),
+        destination.info(),
+        authority.info(),
+    };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
 }
 
 /// Burn tokens via CPI
@@ -293,26 +316,32 @@ pub fn burn(
     authority: Account,
     amount: u64,
 ) !void {
-    const account_metas = [_]AccountMeta{
-        .{ .pubkey = source.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = mint.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = authority.id(), .is_writable = false, .is_signer = true },
+    const account_params = [_]AccountParam{
+        .{ .id = &source.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &mint.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
     };
 
     var data: [9]u8 = undefined;
     data[0] = @intFromEnum(TokenInstruction.Burn);
     std.mem.writeInt(u64, data[1..9], amount, .little);
 
-    const account_infos = [_]Account{ source, mint, authority };
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
 
-    sol.invoke.invoke(
-        &.{
-            .program_id = &TOKEN_PROGRAM_ID,
-            .accounts = &account_metas,
-            .data = &data,
-        },
-        &account_infos,
-    ) catch return error.CpiFailed;
+    const account_infos = [_]AccountInfo{
+        source.info(),
+        mint.info(),
+        authority.info(),
+    };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
 }
 
 /// Close token account via CPI  
@@ -321,24 +350,30 @@ pub fn close(
     destination: Account,
     authority: Account,
 ) !void {
-    const account_metas = [_]AccountMeta{
-        .{ .pubkey = account_to_close.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = destination.id(), .is_writable = true, .is_signer = false },
-        .{ .pubkey = authority.id(), .is_writable = false, .is_signer = true },
+    const account_params = [_]AccountParam{
+        .{ .id = &account_to_close.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
+        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
     };
 
     const data = [_]u8{@intFromEnum(TokenInstruction.CloseAccount)};
 
-    const account_infos = [_]Account{ account_to_close, destination, authority };
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
 
-    sol.invoke.invoke(
-        &.{
-            .program_id = &TOKEN_PROGRAM_ID,
-            .accounts = &account_metas,
-            .data = &data,
-        },
-        &account_infos,
-    ) catch return error.CpiFailed;
+    const account_infos = [_]AccountInfo{
+        account_to_close.info(),
+        destination.info(),
+        authority.info(),
+    };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
 }
 
 // ============================================================================

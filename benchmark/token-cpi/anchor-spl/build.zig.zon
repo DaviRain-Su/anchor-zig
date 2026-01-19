@@ -1,0 +1,14 @@
+.{
+    .name = .token_cpi_anchor_spl,
+    .version = "0.1.0",
+    .fingerprint = 0x7472d1d63db45639,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .path = "../../../../solana-program-sdk-zig",
+        },
+        .sol_anchor_zig = .{
+            .path = "../../..",
+        },
+    },
+    .paths = .{""},
+}
