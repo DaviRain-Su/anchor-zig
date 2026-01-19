@@ -12,8 +12,7 @@ The simplest possible program - just logs "Hello world!".
 | Implementation      | CU Usage | Overhead  | Size    |
 |---------------------|----------|-----------|---------|
 | Raw Zig (baseline)  | 105      | baseline  | 1.4 KB  |
-| Anchor-Zig (DSL)    | 131      | +26 CU    | 6.1 KB  |
-| Anchor-Zig (minimal)| 131      | +26 CU    | 6.1 KB  |
+| Anchor-Zig          | 131      | +26 CU    | 6.1 KB  |
 
 ### Reference (solana-program-rosetta)
 

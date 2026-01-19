@@ -119,15 +119,9 @@ async function main() {
       data: Buffer.alloc(0),
     },
     {
-      name: "Anchor-Zig (DSL)",
+      name: "Anchor-Zig",
       soPath: "anchor-zig/zig-out/lib/helloworld_anchor.so",
       keypairPath: "/tmp/helloworld-anchor-zig-keypair.json",
-      data: anchorDiscriminator("hello"),
-    },
-    {
-      name: "Anchor-Zig (minimal)",
-      soPath: "anchor-zig-minimal/zig-out/lib/helloworld_anchor_minimal.so",
-      keypairPath: "/tmp/helloworld-anchor-zig-minimal-keypair.json",
       data: anchorDiscriminator("hello"),
     },
   ];
@@ -189,7 +183,7 @@ async function main() {
   console.log("└────────────────────────┴──────────┘");
   
   // Analysis
-  const anchorResult = results.find(r => r.name.includes("DSL"));
+  const anchorResult = results.find(r => r.name.includes("Anchor"));
   if (anchorResult) {
     const overhead = anchorResult.cu - baseline;
     const overheadPct = (overhead / baseline * 100).toFixed(1);
