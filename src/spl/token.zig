@@ -235,17 +235,18 @@ const AccountInfo = sol.account.Account.Info;
 const AccountParam = sol.account.Account.Param;
 
 /// Transfer tokens via CPI
+/// Accepts Account.Info directly for use with ProgramContext
 pub fn transfer(
-    source: Account,
-    destination: Account,
-    authority: Account,
+    source: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
     amount: u64,
 ) !void {
     // Build account params for CPI
     const account_params = [_]AccountParam{
-        .{ .id = &source.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
     };
 
     // Build instruction data
@@ -261,11 +262,7 @@ pub fn transfer(
     });
 
     // Build account infos for invoke
-    const account_infos = [_]AccountInfo{
-        source.info(),
-        destination.info(),
-        authority.info(),
-    };
+    const account_infos = [_]AccountInfo{ source, destination, authority };
 
     // Invoke SPL Token Program
     if (ix.invoke(&account_infos)) |err| {
@@ -276,15 +273,15 @@ pub fn transfer(
 
 /// Mint tokens via CPI
 pub fn mintTo(
-    mint: Account,
-    destination: Account,
-    authority: Account,
+    mint: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
     amount: u64,
 ) !void {
     const account_params = [_]AccountParam{
-        .{ .id = &mint.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
     };
 
     var data: [9]u8 = undefined;
@@ -297,11 +294,7 @@ pub fn mintTo(
         .data = &data,
     });
 
-    const account_infos = [_]AccountInfo{
-        mint.info(),
-        destination.info(),
-        authority.info(),
-    };
+    const account_infos = [_]AccountInfo{ mint, destination, authority };
 
     if (ix.invoke(&account_infos)) |err| {
         _ = err;
@@ -311,15 +304,15 @@ pub fn mintTo(
 
 /// Burn tokens via CPI
 pub fn burn(
-    source: Account,
-    mint: Account,
-    authority: Account,
+    source: AccountInfo,
+    mint: AccountInfo,
+    authority: AccountInfo,
     amount: u64,
 ) !void {
     const account_params = [_]AccountParam{
-        .{ .id = &source.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &mint.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
     };
 
     var data: [9]u8 = undefined;
@@ -332,11 +325,7 @@ pub fn burn(
         .data = &data,
     });
 
-    const account_infos = [_]AccountInfo{
-        source.info(),
-        mint.info(),
-        authority.info(),
-    };
+    const account_infos = [_]AccountInfo{ source, mint, authority };
 
     if (ix.invoke(&account_infos)) |err| {
         _ = err;
@@ -346,14 +335,14 @@ pub fn burn(
 
 /// Close token account via CPI  
 pub fn close(
-    account_to_close: Account,
-    destination: Account,
-    authority: Account,
+    account_to_close: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
 ) !void {
     const account_params = [_]AccountParam{
-        .{ .id = &account_to_close.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &destination.ptr.id, .is_writable = true, .is_signer = false },
-        .{ .id = &authority.ptr.id, .is_writable = false, .is_signer = true },
+        .{ .id = account_to_close.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
     };
 
     const data = [_]u8{@intFromEnum(TokenInstruction.CloseAccount)};
@@ -364,11 +353,7 @@ pub fn close(
         .data = &data,
     });
 
-    const account_infos = [_]AccountInfo{
-        account_to_close.info(),
-        destination.info(),
-        authority.info(),
-    };
+    const account_infos = [_]AccountInfo{ account_to_close, destination, authority };
 
     if (ix.invoke(&account_infos)) |err| {
         _ = err;

@@ -1,113 +1,192 @@
-//! Token CPI Example using anchor.spl.token
+//! Token CPI Example using anchor-zig framework
 //!
-//! This demonstrates the CORRECT usage of anchor.spl.token module:
-//! - Calling the real SPL Token Program via CPI
-//! - Using Anchor-style account definitions
-//! - Type-safe token account access
+//! This demonstrates the FULL Anchor-style API for CPI:
+//! - Declarative account definitions with spl.token types
+//! - zero.program() for instruction dispatch
+//! - spl.token CPI helpers for calling SPL Token Program
 //!
-//! This is similar to how you would use `anchor_spl::token` in Rust Anchor.
+//! Similar to Rust Anchor's usage:
+//! ```rust
+//! use anchor_lang::prelude::*;
+//! use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+//!
+//! #[derive(Accounts)]
+//! pub struct TransferTokens<'info> {
+//!     #[account(mut)]
+//!     pub source: Account<'info, TokenAccount>,
+//!     #[account(mut)]  
+//!     pub destination: Account<'info, TokenAccount>,
+//!     pub authority: Signer<'info>,
+//!     pub token_program: Program<'info, Token>,
+//! }
+//!
+//! pub fn transfer_tokens(ctx: Context<TransferTokens>, amount: u64) -> Result<()> {
+//!     token::transfer(
+//!         CpiContext::new(
+//!             ctx.accounts.token_program.to_account_info(),
+//!             Transfer {
+//!                 from: ctx.accounts.source.to_account_info(),
+//!                 to: ctx.accounts.destination.to_account_info(),
+//!                 authority: ctx.accounts.authority.to_account_info(),
+//!             },
+//!         ),
+//!         amount,
+//!     )
+//! }
+//! ```
 
 const std = @import("std");
 const anchor = @import("sol_anchor_zig");
+const zero = anchor.zero_cu;
 const spl = anchor.spl;
 const sol = anchor.sdk;
 
-const PublicKey = sol.public_key.PublicKey;
-const Context = sol.context.Context;
-
 // ============================================================================
-// Program Instructions
+// Account Definitions - Anchor Style with SPL Token types!
 // ============================================================================
 
-// Discriminators (8-byte Anchor style)
-const TRANSFER_DISC: u64 = 0xf3a8d8a012b0e71c; // anchor discriminator for "transfer"
-const MINT_TO_DISC: u64 = 0x6e3f8f4a2b1c0d9e;  // anchor discriminator for "mint_to"  
-const BURN_DISC: u64 = 0x1a2b3c4d5e6f7890;     // anchor discriminator for "burn"
-const CLOSE_DISC: u64 = 0x0987654321fedcba;    // anchor discriminator for "close"
-
-// ============================================================================
-// Handlers - Using spl.token CPI helpers
-// ============================================================================
-
-/// Transfer tokens using spl.token.transfer() CPI
-fn handleTransfer(accounts: []const sol.account.Account, data: []const u8) !void {
-    if (accounts.len < 4) return error.NotEnoughAccountKeys;
-    if (data.len < 16) return error.InvalidInstructionData; // 8 disc + 8 amount
+/// Transfer instruction accounts
+/// Similar to Rust: #[derive(Accounts)] pub struct Transfer<'info>
+const TransferAccounts = struct {
+    /// Source token account (writable)
+    /// #[account(mut)]
+    source: spl.token.TokenAccount(.{ .mut = true }),
     
-    const source = accounts[0];
-    const destination = accounts[1];
-    const authority = accounts[2];
-    // accounts[3] is token_program
+    /// Destination token account (writable)
+    /// #[account(mut)]
+    destination: spl.token.TokenAccount(.{ .mut = true }),
     
-    const amount = std.mem.readInt(u64, data[8..16], .little);
+    /// Authority/owner of source account (signer)
+    authority: zero.Signer(0),
+    
+    /// SPL Token Program
+    /// Program<'info, Token>
+    token_program: spl.token.Program,
+};
+
+/// MintTo instruction accounts
+const MintToAccounts = struct {
+    /// The mint (writable)
+    mint: spl.token.MintAccount(.{ .mut = true }),
+    
+    /// Destination token account (writable)
+    destination: spl.token.TokenAccount(.{ .mut = true }),
+    
+    /// Mint authority (signer)
+    authority: zero.Signer(0),
+    
+    /// SPL Token Program
+    token_program: spl.token.Program,
+};
+
+/// Burn instruction accounts  
+const BurnAccounts = struct {
+    /// Source token account (writable)
+    source: spl.token.TokenAccount(.{ .mut = true }),
+    
+    /// The mint (writable)
+    mint: spl.token.MintAccount(.{ .mut = true }),
+    
+    /// Authority (signer)
+    authority: zero.Signer(0),
+    
+    /// SPL Token Program
+    token_program: spl.token.Program,
+};
+
+/// CloseAccount instruction accounts
+const CloseAccounts = struct {
+    /// Account to close (writable)
+    account: spl.token.TokenAccount(.{ .mut = true }),
+    
+    /// Destination for rent lamports (writable)
+    destination: zero.Mut(0),
+    
+    /// Authority (signer)
+    authority: zero.Signer(0),
+    
+    /// SPL Token Program
+    token_program: spl.token.Program,
+};
+
+// ============================================================================
+// Instruction Arguments
+// ============================================================================
+
+const AmountArgs = extern struct {
+    amount: u64,
+};
+
+// ============================================================================
+// Handlers - Clean Anchor-style using spl.token CPI!
+// ============================================================================
+
+/// Transfer tokens via CPI to SPL Token Program
+fn transfer(ctx: *zero.ProgramContext(TransferAccounts)) !void {
+    // Get typed arguments (skip 8-byte discriminator automatically)
+    const args = ctx.args(AmountArgs);
+    
+    // Get accounts accessor
+    const accs = ctx.accounts();
     
     // Use anchor.spl.token CPI helper!
-    try spl.token.transfer(source, destination, authority, amount);
+    // This calls the real SPL Token Program
+    try spl.token.transfer(
+        accs.source.info(),
+        accs.destination.info(),
+        accs.authority.info(),
+        args.amount,
+    );
 }
 
-/// Mint tokens using spl.token.mintTo() CPI
-fn handleMintTo(accounts: []const sol.account.Account, data: []const u8) !void {
-    if (accounts.len < 4) return error.NotEnoughAccountKeys;
-    if (data.len < 16) return error.InvalidInstructionData;
+/// Mint tokens via CPI to SPL Token Program
+fn mintTo(ctx: *zero.ProgramContext(MintToAccounts)) !void {
+    const args = ctx.args(AmountArgs);
+    const accs = ctx.accounts();
     
-    const mint = accounts[0];
-    const destination = accounts[1];
-    const authority = accounts[2];
-    // accounts[3] is token_program
-    
-    const amount = std.mem.readInt(u64, data[8..16], .little);
-    
-    // Use anchor.spl.token CPI helper!
-    try spl.token.mintTo(mint, destination, authority, amount);
+    try spl.token.mintTo(
+        accs.mint.info(),
+        accs.destination.info(),
+        accs.authority.info(),
+        args.amount,
+    );
 }
 
-/// Burn tokens using spl.token.burn() CPI
-fn handleBurn(accounts: []const sol.account.Account, data: []const u8) !void {
-    if (accounts.len < 4) return error.NotEnoughAccountKeys;
-    if (data.len < 16) return error.InvalidInstructionData;
+/// Burn tokens via CPI to SPL Token Program
+fn burn(ctx: *zero.ProgramContext(BurnAccounts)) !void {
+    const args = ctx.args(AmountArgs);
+    const accs = ctx.accounts();
     
-    const source = accounts[0];
-    const mint = accounts[1];
-    const authority = accounts[2];
-    // accounts[3] is token_program
-    
-    const amount = std.mem.readInt(u64, data[8..16], .little);
-    
-    // Use anchor.spl.token CPI helper!
-    try spl.token.burn(source, mint, authority, amount);
+    try spl.token.burn(
+        accs.source.info(),
+        accs.mint.info(),
+        accs.authority.info(),
+        args.amount,
+    );
 }
 
-/// Close token account using spl.token.close() CPI
-fn handleClose(accounts: []const sol.account.Account) !void {
-    if (accounts.len < 4) return error.NotEnoughAccountKeys;
+/// Close token account via CPI to SPL Token Program
+fn close(ctx: *zero.ProgramContext(CloseAccounts)) !void {
+    const accs = ctx.accounts();
     
-    const account_to_close = accounts[0];
-    const destination = accounts[1];
-    const authority = accounts[2];
-    // accounts[3] is token_program
-    
-    // Use anchor.spl.token CPI helper!
-    try spl.token.close(account_to_close, destination, authority);
+    try spl.token.close(
+        accs.account.info(),
+        accs.destination.info(),
+        accs.authority.info(),
+    );
 }
 
 // ============================================================================
-// Entrypoint
+// Program Entry - Using zero.program() API!
 // ============================================================================
 
-export fn entrypoint(input: [*]u8) u64 {
-    const context = Context.load(input) catch return 1;
-    if (context.data.len < 8) return 1;
-    
-    const discriminant = std.mem.readInt(u64, context.data[0..8], .little);
-    const accounts = context.accounts[0..context.num_accounts];
-    
-    switch (discriminant) {
-        TRANSFER_DISC => handleTransfer(accounts, context.data) catch return 1,
-        MINT_TO_DISC => handleMintTo(accounts, context.data) catch return 1,
-        BURN_DISC => handleBurn(accounts, context.data) catch return 1,
-        CLOSE_DISC => handleClose(accounts) catch return 1,
-        else => return 1,
-    }
-    
-    return 0;
+comptime {
+    // Export program with multiple instructions, each with its own account layout
+    // Uses dynamic parsing (Context.load) because we have Program type
+    zero.program(.{
+        zero.ix("transfer", TransferAccounts, transfer),
+        zero.ix("mint_to", MintToAccounts, mintTo),
+        zero.ix("burn", BurnAccounts, burn),
+        zero.ix("close", CloseAccounts, close),
+    });
 }

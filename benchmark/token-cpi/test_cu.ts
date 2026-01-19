@@ -29,11 +29,19 @@ import * as fs from "fs";
 
 const connection = new Connection("http://localhost:8899", "confirmed");
 
-// Our program's discriminators
-const TRANSFER_DISC = Buffer.from([0x1c, 0xe7, 0xb0, 0x12, 0xa0, 0xd8, 0xa8, 0xf3]);
-const MINT_TO_DISC = Buffer.from([0x9e, 0x0d, 0x1c, 0x2b, 0x4a, 0x8f, 0x3f, 0x6e]);
-const BURN_DISC = Buffer.from([0x90, 0x78, 0x6f, 0x5e, 0x4d, 0x3c, 0x2b, 0x1a]);
-const CLOSE_DISC = Buffer.from([0xba, 0xdc, 0xfe, 0x21, 0x43, 0x65, 0x87, 0x09]);
+// Anchor-style discriminators (first 8 bytes of sha256("global:<instruction_name>"))
+// These match what zero.ix("transfer", ...) generates
+import { createHash } from "crypto";
+
+function anchorDiscriminator(name: string): Buffer {
+  const hash = createHash("sha256").update(`global:${name}`).digest();
+  return hash.slice(0, 8);
+}
+
+const TRANSFER_DISC = anchorDiscriminator("transfer");
+const MINT_TO_DISC = anchorDiscriminator("mint_to");
+const BURN_DISC = anchorDiscriminator("burn");
+const CLOSE_DISC = anchorDiscriminator("close");
 
 interface ProgramInfo {
   name: string;
