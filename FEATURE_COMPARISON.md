@@ -6,7 +6,7 @@
 |---------|-------------|---------------------|------|
 | 账户类型 | ✅ 完整 | ✅ 完整 | ✅ |
 | 约束系统 | ✅ 完整 | ✅ 完整 | ✅ |
-| CPI 帮助 | ✅ 完整 | ⚠️ 基础 | ⚠️ |
+| CPI 帮助 | ✅ 完整 | ✅ 完整 | ✅ |
 | IDL 生成 | ✅ 完整 | ✅ 基础 | ✅ |
 | 事件系统 | ✅ 完整 | ✅ 完整 | ✅ |
 | 错误处理 | ✅ 完整 | ✅ 完整 | ✅ |
@@ -71,37 +71,38 @@
 | `system_program::create_account` | `zero.createAccount()` | ✅ |
 | `system_program::transfer` | `zero.transferLamports()` | ✅ |
 | `system_program::allocate` | `zero.allocate()` | ✅ |
-| `system_program::assign` | ❌ | ❌ |
+| `system_program::assign` | `zero.assign()` | ✅ |
 
 ### 3.2 SPL Token CPI
 
 | Rust Anchor | anchor-zig | 状态 |
 |-------------|-----------|------|
 | `token::transfer` | `spl.token.transfer()` | ✅ |
+| `token::transfer_checked` | `spl.token.transferChecked()` | ✅ |
 | `token::mint_to` | `spl.token.mintTo()` | ✅ |
+| `token::mint_to_checked` | `spl.token.mintToChecked()` | ✅ |
 | `token::burn` | `spl.token.burn()` | ✅ |
+| `token::burn_checked` | `spl.token.burnChecked()` | ✅ |
 | `token::close_account` | `spl.token.close()` | ✅ |
-| `token::approve` | ❌ | ❌ |
-| `token::revoke` | ❌ | ❌ |
-| `token::set_authority` | ❌ | ❌ |
-| `token::freeze_account` | ❌ | ❌ |
-| `token::thaw_account` | ❌ | ❌ |
-| `token::initialize_mint` | ❌ | ❌ |
-| `token::initialize_account` | ❌ | ❌ |
-| `token::sync_native` | ❌ | ❌ |
+| `token::approve` | `spl.token.approve()` | ✅ |
+| `token::approve_checked` | `spl.token.approveChecked()` | ✅ |
+| `token::revoke` | `spl.token.revoke()` | ✅ |
+| `token::set_authority` | `spl.token.setAuthority()` | ✅ |
+| `token::freeze_account` | `spl.token.freezeAccount()` | ✅ |
+| `token::thaw_account` | `spl.token.thawAccount()` | ✅ |
+| `token::initialize_mint` | `spl.token.initializeMint()` | ✅ |
+| `token::initialize_mint2` | `spl.token.initializeMint2()` | ✅ |
+| `token::initialize_account` | `spl.token.initializeAccount()` | ✅ |
+| `token::initialize_account2` | `spl.token.initializeAccount2()` | ✅ |
+| `token::initialize_account3` | `spl.token.initializeAccount3()` | ✅ |
+| `token::sync_native` | `spl.token.syncNative()` | ✅ |
 
 ### 3.3 Associated Token CPI
 
 | Rust Anchor | anchor-zig | 状态 |
 |-------------|-----------|------|
-| `associated_token::create` | `associated_token.createCpi()` | ✅ |
-| `associated_token::create_idempotent` | ❌ | ❌ |
-
-### 缺失功能：
-- Token approve/revoke/set_authority
-- Token freeze/thaw
-- Token initialize (mint/account)
-- ATA create_idempotent
+| `associated_token::create` | `associated_token.create()` | ✅ |
+| `associated_token::create_idempotent` | `associated_token.createIdempotent()` | ✅ |
 
 ---
 
@@ -156,24 +157,18 @@
 
 ---
 
-## 优先实现建议
+## 剩余待实现功能
 
-### 高优先级 (常用功能)
-1. **Token approve/revoke** - 代币授权
-2. **Token set_authority** - 修改权限
-3. **realloc 约束** - 动态账户大小
-4. **ATA create_idempotent** - 幂等创建 ATA
+### 账户类型 (低优先级)
+- **AccountLoader** - 零拷贝大账户 (>10KB 场景)
+- **Interface/InterfaceAccount** - Token-2022 等多程序兼容
 
-### 中优先级 (进阶功能)
-5. **AccountLoader** - 零拷贝大账户
-6. **constraint 表达式** - 自定义约束
-7. **Token initialize** - 创建 mint/account
-8. **Interface 账户** - Token-2022 兼容
+### 约束系统 (可选)
+- **constraint** - 自定义表达式约束 (用户可手动实现)
 
-### 低优先级 (特殊场景)
-9. Token freeze/thaw
-10. rent_exempt 验证
-11. executable 检查
+### 其他 (可选)
+- **Context bumps** - 自动 bump 存储
+- **Remaining accounts** - 额外账户处理
 
 ---
 
@@ -245,60 +240,34 @@ fn initialize(ctx) !void {
 
 ---
 
-## 需要添加的关键功能
-
-### 1. SPL Token 完整 CPI (高优先级)
-
-在 `src/spl/token.zig` 添加：
-
-```zig
-// 授权
-pub fn approve(args: ApproveArgs) !void { ... }
-pub fn revoke(args: RevokeArgs) !void { ... }
-
-// 权限管理
-pub fn setAuthority(args: SetAuthorityArgs) !void { ... }
-
-// 冻结/解冻
-pub fn freezeAccount(args: FreezeArgs) !void { ... }
-pub fn thawAccount(args: ThawArgs) !void { ... }
-
-// 初始化
-pub fn initializeMint(args: InitMintArgs) !void { ... }
-pub fn initializeAccount(args: InitAccountArgs) !void { ... }
-```
-
-### 2. System Program 完整 CPI
-
-在 `zero_cu.zig` 或新建 `src/spl/system.zig`：
-
-```zig
-pub fn assign(account: anytype, owner: PublicKey) !void { ... }
-pub fn createAccountWithSeed(...) !void { ... }
-```
-
-### 3. ATA create_idempotent
-
-在 `src/associated_token.zig`：
-
-```zig
-pub fn createIdempotent(args: CreateIdempotentArgs) !void { ... }
-```
-
----
-
 ## 结论
 
-**anchor-zig 覆盖了 Rust Anchor 约 70-80% 的常用功能**，足以构建大多数 Solana 程序。
+**anchor-zig 现在覆盖了 Rust Anchor 约 95%+ 的常用功能**，足以构建几乎所有 Solana 程序。
 
-**设计哲学差异**：
-- Rust Anchor: 安全优先，自动验证，~150 CU 开销
-- anchor-zig: 性能优先，手动控制，5-7 CU 开销
+### 功能完成状态
 
-主要功能差距：
-1. SPL Token 的完整 CPI (approve, set_authority 等)
-2. ATA create_idempotent
-3. AccountLoader 零拷贝 (大账户场景)
-4. Interface 账户类型 (Token-2022 兼容)
+| 功能类别 | 状态 | 说明 |
+|---------|------|------|
+| 账户类型 | ✅ 完整 | Signer, Mut, Account, Program, Optional, UncheckedAccount |
+| 约束系统 | ✅ 完整 | owner, address, seeds, has_one, init, close, realloc, 等 |
+| System CPI | ✅ 完整 | createAccount, transfer, allocate, assign |
+| Token CPI | ✅ 完整 | 全部 20+ 指令 |
+| ATA CPI | ✅ 完整 | create, createIdempotent |
+| IDL 生成 | ✅ 完整 | instructions, accounts, types, events |
+| 事件系统 | ✅ 完整 | emitEvent |
+| 错误处理 | ✅ 完整 | AnchorError, customErrorCode |
 
-这些可以按需添加到 `spl/token.zig` 和 `zero_cu.zig` 中。
+### 设计哲学差异
+
+| 方面 | Rust Anchor | anchor-zig |
+|------|-------------|-----------|
+| 验证方式 | 自动执行 | 可选执行 |
+| CU 开销 | ~150 CU | 5-7 CU |
+| 安全模式 | 默认开启 | 手动开启 |
+| 灵活性 | 固定 | 完全控制 |
+
+### 剩余待实现 (低优先级)
+
+- AccountLoader (零拷贝大账户)
+- Interface/InterfaceAccount (Token-2022)
+- constraint 表达式 (用户可手动实现)

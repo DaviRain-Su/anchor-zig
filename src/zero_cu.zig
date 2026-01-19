@@ -1749,6 +1749,29 @@ pub fn transferLamports(from: anytype, to: anytype, amount: u64) !void {
     to_lamports.* += amount;
 }
 
+/// Assign a new owner to an account via CPI
+///
+/// Changes the owner of `account` to `new_owner`.
+/// The account must be writable and a signer.
+pub fn assign(account: anytype, new_owner: PublicKey, seeds: []const []const []const u8) !void {
+    const account_info = SdkAccount.Info{
+        .id = account.id(),
+        .lamports = account.lamports(),
+        .data = @constCast(account.dataSlice().ptr),
+        .data_len = account.dataSlice().len,
+        .owner_id = account.ownerId(),
+        .is_signer = if (account.isSigner()) 1 else 0,
+        .is_writable = if (account.isWritable()) 1 else 0,
+        .is_executable = if (account.isExecutable()) 1 else 0,
+    };
+
+    sol.system_program.assignCpi(.{
+        .account = account_info,
+        .owner = new_owner,
+        .seeds = seeds,
+    }) catch return error.AssignFailed;
+}
+
 /// Write discriminator to account data
 pub fn writeDiscriminator(account: anytype, comptime name: []const u8) void {
     const disc = discriminator_mod.accountDiscriminator(name);

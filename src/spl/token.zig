@@ -361,6 +361,544 @@ pub fn close(
     }
 }
 
+/// Approve delegate to transfer tokens via CPI
+///
+/// Allows `delegate` to transfer up to `amount` tokens from `source`.
+pub fn approve(
+    source: AccountInfo,
+    delegate: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = delegate.id, .is_writable = false, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    var data: [9]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.Approve);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, delegate, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Revoke delegate approval via CPI
+///
+/// Removes any delegate approval on the token account.
+pub fn revoke(
+    source: AccountInfo,
+    authority: AccountInfo,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    const data = [_]u8{@intFromEnum(TokenInstruction.Revoke)};
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Authority type for setAuthority instruction
+pub const AuthorityType = enum(u8) {
+    /// Authority to mint tokens
+    MintTokens = 0,
+    /// Authority to freeze token accounts
+    FreezeAccount = 1,
+    /// Authority over a token account (owner)
+    AccountOwner = 2,
+    /// Authority to close a token account
+    CloseAccount = 3,
+};
+
+/// Set new authority on account or mint via CPI
+///
+/// Changes the authority of `account` from `current_authority` to `new_authority`.
+/// If `new_authority` is null, the authority is removed permanently.
+pub fn setAuthority(
+    account: AccountInfo,
+    current_authority: AccountInfo,
+    authority_type: AuthorityType,
+    new_authority: ?*const PublicKey,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = current_authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    // Data: instruction (1) + authority_type (1) + COption<Pubkey> (1 + 32)
+    var data: [35]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.SetAuthority);
+    data[1] = @intFromEnum(authority_type);
+    
+    if (new_authority) |auth| {
+        data[2] = 1; // COption::Some
+        @memcpy(data[3..35], &auth.bytes);
+    } else {
+        data[2] = 0; // COption::None
+        @memset(data[3..35], 0);
+    }
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, current_authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Freeze token account via CPI
+///
+/// Prevents any transfers from the frozen account until thawed.
+/// Requires freeze authority on the mint.
+pub fn freezeAccount(
+    account: AccountInfo,
+    mint: AccountInfo,
+    freeze_authority: AccountInfo,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+        .{ .id = freeze_authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    const data = [_]u8{@intFromEnum(TokenInstruction.FreezeAccount)};
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, mint, freeze_authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Thaw (unfreeze) token account via CPI
+///
+/// Re-enables transfers from a frozen account.
+/// Requires freeze authority on the mint.
+pub fn thawAccount(
+    account: AccountInfo,
+    mint: AccountInfo,
+    freeze_authority: AccountInfo,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+        .{ .id = freeze_authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    const data = [_]u8{@intFromEnum(TokenInstruction.ThawAccount)};
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, mint, freeze_authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Initialize a new mint via CPI
+///
+/// Creates a new token mint with the given decimals and authorities.
+/// The `mint` account must be pre-allocated with `Mint.SIZE` bytes.
+pub fn initializeMint(
+    mint: AccountInfo,
+    rent_sysvar: AccountInfo,
+    decimals: u8,
+    mint_authority: *const PublicKey,
+    freeze_authority: ?*const PublicKey,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+        .{ .id = rent_sysvar.id, .is_writable = false, .is_signer = false },
+    };
+
+    // Data: instruction (1) + decimals (1) + mint_authority (32) + COption<freeze_authority> (1 + 32)
+    var data: [67]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.InitializeMint);
+    data[1] = decimals;
+    @memcpy(data[2..34], &mint_authority.bytes);
+    
+    if (freeze_authority) |auth| {
+        data[34] = 1; // COption::Some
+        @memcpy(data[35..67], &auth.bytes);
+    } else {
+        data[34] = 0; // COption::None
+        @memset(data[35..67], 0);
+    }
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ mint, rent_sysvar };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Initialize a new mint via CPI (version 2, no rent sysvar needed)
+///
+/// Creates a new token mint with the given decimals and authorities.
+/// The `mint` account must be pre-allocated with `Mint.SIZE` bytes.
+pub fn initializeMint2(
+    mint: AccountInfo,
+    decimals: u8,
+    mint_authority: *const PublicKey,
+    freeze_authority: ?*const PublicKey,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+    };
+
+    // Data: instruction (1) + decimals (1) + mint_authority (32) + COption<freeze_authority> (1 + 32)
+    var data: [67]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.InitializeMint2);
+    data[1] = decimals;
+    @memcpy(data[2..34], &mint_authority.bytes);
+    
+    if (freeze_authority) |auth| {
+        data[34] = 1; // COption::Some
+        @memcpy(data[35..67], &auth.bytes);
+    } else {
+        data[34] = 0; // COption::None
+        @memset(data[35..67], 0);
+    }
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{mint};
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Initialize a new token account via CPI
+///
+/// Creates a new token account for the given mint and owner.
+/// The `account` must be pre-allocated with `TokenAccountData.SIZE` bytes.
+pub fn initializeAccount(
+    account: AccountInfo,
+    mint: AccountInfo,
+    owner: AccountInfo,
+    rent_sysvar: AccountInfo,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+        .{ .id = owner.id, .is_writable = false, .is_signer = false },
+        .{ .id = rent_sysvar.id, .is_writable = false, .is_signer = false },
+    };
+
+    const data = [_]u8{@intFromEnum(TokenInstruction.InitializeAccount)};
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, mint, owner, rent_sysvar };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Initialize a new token account via CPI (version 2, owner in instruction data)
+///
+/// Creates a new token account for the given mint and owner.
+/// The `account` must be pre-allocated with `TokenAccountData.SIZE` bytes.
+pub fn initializeAccount2(
+    account: AccountInfo,
+    mint: AccountInfo,
+    owner: *const PublicKey,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+    };
+
+    // Data: instruction (1) + owner (32)
+    var data: [33]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.InitializeAccount2);
+    @memcpy(data[1..33], &owner.bytes);
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, mint };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Initialize a new token account via CPI (version 3, owner in instruction data, no rent check)
+///
+/// Creates a new token account for the given mint and owner.
+/// The `account` must be pre-allocated with `TokenAccountData.SIZE` bytes.
+pub fn initializeAccount3(
+    account: AccountInfo,
+    mint: AccountInfo,
+    owner: *const PublicKey,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = account.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+    };
+
+    // Data: instruction (1) + owner (32)
+    var data: [33]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.InitializeAccount3);
+    @memcpy(data[1..33], &owner.bytes);
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ account, mint };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Sync native SOL balance via CPI
+///
+/// Synchronizes the token account's amount with its lamport balance.
+/// Only valid for native (wrapped SOL) token accounts.
+pub fn syncNative(
+    native_account: AccountInfo,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = native_account.id, .is_writable = true, .is_signer = false },
+    };
+
+    const data = [_]u8{@intFromEnum(TokenInstruction.SyncNative)};
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{native_account};
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Transfer tokens with checked decimals via CPI
+///
+/// Like `transfer`, but verifies the mint decimals match.
+/// This is the recommended way to transfer tokens.
+pub fn transferChecked(
+    source: AccountInfo,
+    mint: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    decimals: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    // Data: instruction (1) + amount (8) + decimals (1)
+    var data: [10]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.TransferChecked);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+    data[9] = decimals;
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, mint, destination, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Approve delegate with checked decimals via CPI
+///
+/// Like `approve`, but verifies the mint decimals match.
+pub fn approveChecked(
+    source: AccountInfo,
+    mint: AccountInfo,
+    delegate: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    decimals: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = false, .is_signer = false },
+        .{ .id = delegate.id, .is_writable = false, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    // Data: instruction (1) + amount (8) + decimals (1)
+    var data: [10]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.ApproveChecked);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+    data[9] = decimals;
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, mint, delegate, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Mint tokens with checked decimals via CPI
+///
+/// Like `mintTo`, but verifies the mint decimals match.
+pub fn mintToChecked(
+    mint: AccountInfo,
+    destination: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    decimals: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+        .{ .id = destination.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    // Data: instruction (1) + amount (8) + decimals (1)
+    var data: [10]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.MintToChecked);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+    data[9] = decimals;
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ mint, destination, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
+/// Burn tokens with checked decimals via CPI
+///
+/// Like `burn`, but verifies the mint decimals match.
+pub fn burnChecked(
+    source: AccountInfo,
+    mint: AccountInfo,
+    authority: AccountInfo,
+    amount: u64,
+    decimals: u8,
+) !void {
+    const account_params = [_]AccountParam{
+        .{ .id = source.id, .is_writable = true, .is_signer = false },
+        .{ .id = mint.id, .is_writable = true, .is_signer = false },
+        .{ .id = authority.id, .is_writable = false, .is_signer = true },
+    };
+
+    // Data: instruction (1) + amount (8) + decimals (1)
+    var data: [10]u8 = undefined;
+    data[0] = @intFromEnum(TokenInstruction.BurnChecked);
+    std.mem.writeInt(u64, data[1..9], amount, .little);
+    data[9] = decimals;
+
+    const ix = Instruction.from(.{
+        .program_id = &TOKEN_PROGRAM_ID,
+        .accounts = &account_params,
+        .data = &data,
+    });
+
+    const account_infos = [_]AccountInfo{ source, mint, authority };
+
+    if (ix.invoke(&account_infos)) |err| {
+        _ = err;
+        return error.CpiFailed;
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
