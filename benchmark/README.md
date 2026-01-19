@@ -140,6 +140,34 @@ Fixed by using static [64]Account array (only 512 bytes on stack).
 
 Using `RawAccount` wrapper (optimized version) removes account validation overhead.
 
+## Pubkey Comparison Benchmark
+
+Compares account id with owner id (32 bytes comparison).
+
+### Results
+
+| Implementation     | CU Usage | Overhead  | Size     |
+|--------------------|----------|-----------|----------|
+| Raw Zig (baseline) | 5        | -         | 1.2 KB   |
+| Anchor-Zig         | 168      | +163 CU   | 7.9 KB   |
+
+### Reference (solana-program-rosetta)
+
+| Implementation | CU Usage |
+|----------------|----------|
+| Rust           | 14       |
+| **Zig**        | **15**   |
+
+**Our Raw Zig now beats the rosetta reference!** (5 vs 15 CU)
+
+### Note on OptimizeMode
+
+Using `ReleaseFast` instead of `ReleaseSmall` provides better CU performance:
+- ReleaseSmall: 33 CU
+- ReleaseFast: 5 CU
+
+For CU-critical programs, use `ReleaseFast`.
+
 ## Summary
 
 Anchor-Zig provides a full-featured, type-safe framework with:

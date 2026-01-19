@@ -1,0 +1,11 @@
+{
+  "name": "pubkey-benchmark",
+  "type": "module",
+  "scripts": {
+    "test": "tsx test_cu.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "tsx": "^4.7.0"
+  }
+}
