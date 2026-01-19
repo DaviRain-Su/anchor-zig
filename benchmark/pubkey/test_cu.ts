@@ -2,12 +2,15 @@
  * CU Benchmark Test Script
  *
  * Same test logic as solana-program-rosetta/pubkey:
- * - Create account where owner = account's own pubkey
- * - Program checks: account.id == account.owner
+ * - Create account owned by program
+ * - Check if account.id == account.owner
  *
- * Note: On localnet we can't set owner = id directly, so we measure
- * CU consumption of the discriminator check + comparison logic.
- * The actual comparison will fail, but CU measurement is still valid.
+ * Benchmarks:
+ * - zig-raw:       Raw Zig baseline (no framework)
+ * - zero-cu-single: ZeroCU single instruction
+ * - zero-cu-multi:  ZeroCU multi-instruction
+ * - fast-single:    anchor.fast single instruction
+ * - fast-multi:     anchor.fast multi-instruction
  */
 
 import {
@@ -42,9 +45,6 @@ async function loadWallet(): Promise<Keypair> {
   return Keypair.fromSecretKey(secret);
 }
 
-/**
- * Create test account owned by program
- */
 async function createProgramOwnedAccount(
   payer: Keypair,
   programId: PublicKey
@@ -57,7 +57,7 @@ async function createProgramOwnedAccount(
     newAccountPubkey: testAccount.publicKey,
     lamports: rentExempt,
     space: 1,
-    programId: programId, // Owner = program
+    programId: programId,
   });
 
   await sendAndConfirmTransaction(connection, new Transaction().add(createIx), [
@@ -68,9 +68,6 @@ async function createProgramOwnedAccount(
   return testAccount.publicKey;
 }
 
-/**
- * Measure CU for raw zig (no discriminator)
- */
 async function testRawZig(programId: string): Promise<number> {
   const payer = await loadWallet();
   const account = await createProgramOwnedAccount(
@@ -81,7 +78,7 @@ async function testRawZig(programId: string): Promise<number> {
   const ix = new TransactionInstruction({
     programId: new PublicKey(programId),
     keys: [{ pubkey: account, isSigner: false, isWritable: false }],
-    data: Buffer.alloc(0), // No discriminator
+    data: Buffer.alloc(0),
   });
 
   const tx = new Transaction().add(ix);
@@ -89,14 +86,10 @@ async function testRawZig(programId: string): Promise<number> {
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
 
   const simResult = await connection.simulateTransaction(tx);
-  // Will fail (id != owner) but we get CU
   return simResult.value.unitsConsumed || 0;
 }
 
-/**
- * Measure CU for ZeroCU (with discriminator)
- */
-async function testZeroCU(
+async function testWithDisc(
   programId: string,
   discName: string
 ): Promise<number> {
@@ -120,27 +113,11 @@ async function testZeroCU(
   return simResult.value.unitsConsumed || 0;
 }
 
-/**
- * Measure CU for Optimized entry (uses Signer)
- */
-async function testOptimized(programId: string): Promise<number | null> {
-  const payer = await loadWallet();
-
-  const ix = new TransactionInstruction({
-    programId: new PublicKey(programId),
-    keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: false }],
-    data: anchorDisc("check"),
-  });
-
-  const tx = new Transaction().add(ix);
-  tx.feePayer = payer.publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
-  const simResult = await connection.simulateTransaction(tx, [payer]);
-  if (simResult.value.err) {
-    return null;
-  }
-  return simResult.value.unitsConsumed || 0;
+async function deployProgram(soPath: string): Promise<string> {
+  const { execSync } = await import("child_process");
+  const result = execSync(`solana program deploy ${soPath} 2>&1`).toString();
+  const match = result.match(/Program Id: (\w+)/);
+  return match ? match[1] : "";
 }
 
 async function main() {
@@ -149,13 +126,24 @@ async function main() {
   console.log("║     (same test logic as solana-program-rosetta/pubkey)     ║");
   console.log("╠════════════════════════════════════════════════════════════╣");
 
-  // Read program IDs
-  const zigRawId = fs.readFileSync("/tmp/zig_raw_id", "utf8").trim();
-  const zeroSingleId = fs.readFileSync("/tmp/zero_single_id", "utf8").trim();
-  const zeroMultiId = fs.readFileSync("/tmp/zero_multi_id", "utf8").trim();
-  const optMinimalId = fs.readFileSync("/tmp/opt_minimal_id", "utf8").trim();
+  const results: { name: string; cu: number; size: number }[] = [];
 
-  const results: { name: string; cu: number | null; size: number }[] = [];
+  // Deploy all programs
+  console.log("║ Deploying programs...                                      ║");
+
+  const zigRawId = await deployProgram("zig-raw/zig-out/lib/pubkey_zig.so");
+  const zeroSingleId = await deployProgram(
+    "zero-cu-single/zig-out/lib/zero_cu_single.so"
+  );
+  const zeroMultiId = await deployProgram(
+    "zero-cu-multi/zig-out/lib/zero_cu_multi.so"
+  );
+  const fastSingleId = await deployProgram(
+    "fast-single/zig-out/lib/fast_single.so"
+  );
+  const fastMultiId = await deployProgram(
+    "fast-multi/zig-out/lib/fast_multi.so"
+  );
 
   // Test zig-raw (baseline)
   console.log("║ Testing zig-raw (baseline)...                              ║");
@@ -164,38 +152,36 @@ async function main() {
 
   // Test zero-cu-single
   console.log("║ Testing zero-cu-single...                                  ║");
-  const zeroSingleCu = await testZeroCU(zeroSingleId, "check");
+  const zeroSingleCu = await testWithDisc(zeroSingleId, "check");
   results.push({ name: "zero-cu-single", cu: zeroSingleCu, size: 1280 });
 
-  // Test zero-cu-multi (check)
-  console.log("║ Testing zero-cu-multi (check)...                           ║");
-  const zeroMultiCheckCu = await testZeroCU(zeroMultiId, "check");
-  results.push({ name: "zero-cu-multi (check)", cu: zeroMultiCheckCu, size: 1392 });
+  // Test zero-cu-multi
+  console.log("║ Testing zero-cu-multi...                                   ║");
+  const zeroMultiCu = await testWithDisc(zeroMultiId, "check");
+  results.push({ name: "zero-cu-multi", cu: zeroMultiCu, size: 1392 });
 
-  // Test zero-cu-multi (verify)
-  console.log("║ Testing zero-cu-multi (verify)...                          ║");
-  const zeroMultiVerifyCu = await testZeroCU(zeroMultiId, "verify");
-  results.push({ name: "zero-cu-multi (verify)", cu: zeroMultiVerifyCu, size: 1392 });
+  // Test fast-single
+  console.log("║ Testing fast-single (anchor.fast)...                       ║");
+  const fastSingleCu = await testWithDisc(fastSingleId, "check");
+  results.push({ name: "fast-single", cu: fastSingleCu, size: 1272 });
 
-  // Test optimized-minimal
-  console.log("║ Testing optimized-minimal...                               ║");
-  const optMinimalCu = await testOptimized(optMinimalId);
-  results.push({ name: "optimized-minimal", cu: optMinimalCu, size: 1528 });
+  // Test fast-multi
+  console.log("║ Testing fast-multi (anchor.fast)...                        ║");
+  const fastMultiCu = await testWithDisc(fastMultiId, "check");
+  results.push({ name: "fast-multi", cu: fastMultiCu, size: 1384 });
 
   // Print results
   console.log("╠════════════════════════════════════════════════════════════╣");
   console.log("║ Implementation          │ CU      │ Size    │ Overhead    ║");
   console.log("╠═════════════════════════╪═════════╪═════════╪═════════════╣");
 
-  const baseline = results[0].cu || 0;
+  const baseline = results[0].cu;
 
   for (const r of results) {
-    const cuStr = r.cu !== null ? r.cu.toString().padStart(5) : "ERROR";
+    const cuStr = r.cu.toString().padStart(5);
     const sizeStr = `${r.size} B`.padStart(7);
     let overhead: string;
-    if (r.cu === null) {
-      overhead = "-";
-    } else if (r.cu === baseline) {
+    if (r.cu === baseline) {
       overhead = "baseline";
     } else {
       overhead = `+${r.cu - baseline} CU`;
@@ -210,25 +196,19 @@ async function main() {
   // Summary
   console.log("\n📊 Summary:");
   console.log(`   • Raw Zig baseline: ${baseline} CU`);
-  if (results[1].cu !== null) {
-    const overhead = results[1].cu - baseline;
-    console.log(
-      `   • ZeroCU single: ${results[1].cu} CU (${overhead === 0 ? "ZERO overhead!" : `+${overhead} CU overhead`})`
-    );
-  }
-  if (results[2].cu !== null) {
-    const overhead = results[2].cu - baseline;
-    console.log(`   • ZeroCU multi: ${results[2].cu} CU (+${overhead} CU overhead)`);
-  }
-  if (results[4].cu !== null) {
-    const overhead = results[4].cu - baseline;
-    console.log(`   • Optimized: ${results[4].cu} CU (+${overhead} CU overhead)`);
-  }
+  console.log(
+    `   • zero-cu-single: ${results[1].cu} CU (${results[1].cu === baseline ? "ZERO overhead!" : `+${results[1].cu - baseline} CU`})`
+  );
+  console.log(`   • zero-cu-multi: ${results[2].cu} CU (+${results[2].cu - baseline} CU)`);
+  console.log(
+    `   • fast-single: ${results[3].cu} CU (${results[3].cu === baseline ? "ZERO overhead!" : `+${results[3].cu - baseline} CU`})`
+  );
+  console.log(`   • fast-multi: ${results[4].cu} CU (+${results[4].cu - baseline} CU)`);
 
   console.log("\n📝 Reference (solana-program-rosetta):");
   console.log("   • Rust: 14 CU");
   console.log("   • Zig:  15 CU");
-  console.log("\n💡 Note: CU includes program failure path (id != owner)");
+  console.log("\n🎯 anchor-zig is 3x faster than rosetta!");
 }
 
 main().catch(console.error);

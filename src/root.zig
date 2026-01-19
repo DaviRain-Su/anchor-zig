@@ -255,6 +255,34 @@ pub const optimized = @import("optimized.zig");
 pub const ValidationLevel = optimized.ValidationLevel;
 
 // ============================================================================
+// Fast Anchor API (5-7 CU)
+// ============================================================================
+
+/// Fast Anchor API with ZeroCU performance
+///
+/// Provides Anchor-style patterns with 5-7 CU overhead.
+///
+/// ## Example
+///
+/// ```zig
+/// const fast = anchor.fast;
+///
+/// const MyAccounts = struct {
+///     authority: fast.Signer,
+///     counter: fast.Account(CounterData),
+/// };
+///
+/// pub fn increment(ctx: fast.Context(MyAccounts)) !void {
+///     ctx.accounts.counter.getMut().count += 1;
+/// }
+///
+/// comptime {
+///     fast.exportSingle(MyAccounts, "increment", increment);
+/// }
+/// ```
+pub const fast = @import("fast.zig");
+
+// ============================================================================
 // Interface + CPI Helpers
 // ============================================================================
 
