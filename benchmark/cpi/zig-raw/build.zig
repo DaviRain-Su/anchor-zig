@@ -5,11 +5,11 @@ pub fn build(b: *std.Build) void {
     const optimize: std.builtin.OptimizeMode = .ReleaseFast;
     const target = b.resolveTargetQuery(solana.sbf_target);
 
-    const lib_dep = b.dependency("solana_program_library", .{
+    const sdk_dep = b.dependency("solana_program_sdk", .{
         .target = target,
         .optimize = optimize,
     });
-    const lib_mod = lib_dep.module("solana_program_library");
+    const sdk_mod = sdk_dep.module("solana_program_sdk");
 
     const program = b.addLibrary(.{
         .name = "cpi_zig",
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    program.root_module.addImport("solana_program_library", lib_mod);
+    program.root_module.addImport("solana_program_sdk", sdk_mod);
 
     _ = solana.buildProgram(b, program, target, optimize);
     b.installArtifact(program);
