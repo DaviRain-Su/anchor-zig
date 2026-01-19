@@ -641,6 +641,26 @@ fn entryWithValidation(
 
 pub const exportSingleInstruction = entry;
 
+/// Export raw entrypoint without discriminator check
+/// Use this for maximum performance when you don't need Anchor compatibility
+/// 
+/// WARNING: No instruction routing - only use for single-instruction programs
+pub fn entryRaw(
+    comptime Accounts: type,
+    comptime handler: anytype,
+) void {
+    const CtxType = ZeroInstructionContext(Accounts);
+
+    const S = struct {
+        fn entrypoint(input: [*]u8) callconv(.c) u64 {
+            const ctx = CtxType.load(input);
+            if (handler(ctx)) |_| return 0 else |_| return 1;
+        }
+    };
+
+    @export(&S.entrypoint, .{ .name = "entrypoint" });
+}
+
 /// Create instruction with precomputed discriminator
 pub fn instruction(comptime name: []const u8, comptime handler: anytype) struct { u64, @TypeOf(handler), bool } {
     return .{ @as(u64, @bitCast(discriminator_mod.instructionDiscriminator(name))), handler, false };

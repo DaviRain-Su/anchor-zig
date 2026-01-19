@@ -10,7 +10,6 @@ import {
   PublicKey,
   Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -76,14 +75,26 @@ async function main() {
   console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
   const programs: ProgramConfig[] = [
+    // With logging (to show syscall cost)
     {
-      name: "zig-raw (baseline)",
+      name: "zig-raw (with log)",
       soPath: "zig-raw/zig-out/lib/helloworld_zig.so",
       data: Buffer.alloc(0),
     },
     {
-      name: "zero-cu",
+      name: "zero-cu (with log)",
       soPath: "zero-cu/zig-out/lib/helloworld_zero_cu.so",
+      data: anchorDiscriminator("hello"),
+    },
+    // Without logging (pure overhead measurement)
+    {
+      name: "zig-raw-nolog",
+      soPath: "zig-raw-nolog/zig-out/lib/helloworld_raw_nolog.so",
+      data: Buffer.alloc(0),
+    },
+    {
+      name: "zero-cu-nolog",
+      soPath: "zero-cu-nolog/zig-out/lib/helloworld_nolog.so",
       data: anchorDiscriminator("hello"),
     },
   ];
@@ -110,27 +121,26 @@ async function main() {
     console.log(`  ✓ ${prog.name}: ${cu} CU (${size} bytes)`);
   }
 
-  if (results.length >= 2) {
-    const baseline = results[0].cu;
-    
-    console.log("\n╔════════════════════════════════════════════════════════════╗");
-    console.log("║ Implementation        │ CU      │ Size    │ Overhead      ║");
-    console.log("╠═══════════════════════╪═════════╪═════════╪═══════════════╣");
-    
-    for (const r of results) {
-      const overhead = r.cu === baseline ? "baseline" : `+${r.cu - baseline} CU`;
-      console.log(`║ ${r.name.padEnd(21)} │ ${r.cu.toString().padStart(7)} │ ${(r.size + " B").padStart(7)} │ ${overhead.padStart(13)} ║`);
-    }
-    
-    console.log("╚════════════════════════════════════════════════════════════╝");
-    
-    console.log("\n📊 Summary:");
-    console.log(`   • Raw Zig baseline: ${results[0].cu} CU`);
-    console.log(`   • zero-cu: ${results[1].cu} CU (+${results[1].cu - results[0].cu} CU overhead)`);
-    
-    console.log("\n📚 Reference (solana-program-rosetta helloworld):");
-    console.log("   • Rust: 105 CU");
-    console.log("   • Zig:  105 CU");
+  console.log("\n╔════════════════════════════════════════════════════════════════╗");
+  console.log("║ Implementation        │ CU      │ Size    │ Notes             ║");
+  console.log("╠═══════════════════════╪═════════╪═════════╪═══════════════════╣");
+  
+  for (const r of results) {
+    const notes = r.name.includes("log)") ? "~100 CU for sol_log_" : "pure overhead";
+    console.log(`║ ${r.name.padEnd(21)} │ ${r.cu.toString().padStart(7)} │ ${(r.size + " B").padStart(7)} │ ${notes.padEnd(17)} ║`);
+  }
+  
+  console.log("╚════════════════════════════════════════════════════════════════╝");
+
+  // Find nolog versions for overhead calculation
+  const rawNolog = results.find(r => r.name === "zig-raw-nolog");
+  const zeroCuNolog = results.find(r => r.name === "zero-cu-nolog");
+  
+  if (rawNolog && zeroCuNolog) {
+    console.log("\n📊 Framework Overhead (no logging):");
+    console.log(`   • zig-raw-nolog (baseline): ${rawNolog.cu} CU`);
+    console.log(`   • zero-cu-nolog: ${zeroCuNolog.cu} CU (+${zeroCuNolog.cu - rawNolog.cu} CU overhead)`);
+    console.log("\n💡 Note: sol.log.log() syscall costs ~100 CU per call");
   }
 }
 
