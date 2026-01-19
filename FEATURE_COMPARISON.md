@@ -5,8 +5,8 @@
 | 功能类别 | Rust Anchor | anchor-zig (zero_cu) | 状态 |
 |---------|-------------|---------------------|------|
 | 账户类型 | ✅ 完整 | ✅ 完整 | ✅ |
-| 约束系统 | ✅ 完整 | ⚠️ 大部分 | ⚠️ |
-| CPI 帮助 | ✅ 完整 | ✅ 基础 | ✅ |
+| 约束系统 | ✅ 完整 | ✅ 完整 | ✅ |
+| CPI 帮助 | ✅ 完整 | ⚠️ 基础 | ⚠️ |
 | IDL 生成 | ✅ 完整 | ✅ 基础 | ✅ |
 | 事件系统 | ✅ 完整 | ✅ 完整 | ✅ |
 | 错误处理 | ✅ 完整 | ✅ 完整 | ✅ |
@@ -45,17 +45,20 @@
 | `#[account(has_one = <field>)]` | `.has_one = &.{"field"}` | ✅ | 字段匹配 |
 | `#[account(init, payer = <acc>, space = N)]` | `.init = true, .payer = "acc"` | ✅ | `processInit()` |
 | `#[account(close = <acc>)]` | `.close = "acc"` | ✅ | `processClose()` |
-| `#[account(realloc = N, ...)]` | ❌ | ❌ | 重新分配空间 |
+| `#[account(realloc = N, ...)]` | `.realloc = N, .realloc_payer = "acc"` | ✅ | `processRealloc()` |
 | `#[account(constraint = <expr>)]` | ❌ | ❌ | 自定义约束表达式 |
-| `#[account(rent_exempt = ...)]` | ❌ | ❌ | 租金豁免检查 |
-| `#[account(executable)]` | ❌ | ❌ | 可执行检查 |
-| `#[account(zero)]` | ❌ | ❌ | 零初始化检查 |
+| `#[account(rent_exempt = ...)]` | `.rent_exempt = true/false` | ✅ | `validate()` |
+| `#[account(executable)]` | `.executable = true` | ✅ | `validate()` |
+| `#[account(zero)]` | `.zero = true` | ✅ | `validate()` |
+| `#[account(bump = <expr>)]` | `.bump = <u8>` | ✅ | PDA 验证 |
+| `token::mint` | `.token_mint = PUBKEY` | ✅ | Token mint 验证 |
+| `token::authority` | `.token_authority = "acc"` | ✅ | Token authority 验证 |
+| `mint::authority` | `.mint_authority = "acc"` | ✅ | Mint authority 验证 |
+| `mint::decimals` | `.mint_decimals = <u8>` | ✅ | Mint decimals 验证 |
 
 ### 缺失功能：
-- **realloc** - 动态调整账户大小
-- **constraint** - 自定义表达式约束
-- **rent_exempt** - 租金豁免验证
-- **executable** - 可执行程序检查
+- **constraint** - 自定义表达式约束 (需要用户手动实现)
+- **associated_token::mint/authority** - ATA 约束 (可通过 token_* 实现)
 
 ---
 

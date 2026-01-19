@@ -111,14 +111,48 @@ pub const AccountConstraints = struct {
     writable: bool = false,
     /// Account discriminator (for Anchor compatibility)
     discriminator: ?[8]u8 = null,
-    /// Close to this account
+    /// Close to this account (transfers lamports and zeros data)
     close: ?[]const u8 = null,
-    /// Initialize account
+    /// Initialize account (creates via CPI)
     init: bool = false,
     /// Payer for init
     payer: ?[]const u8 = null,
-    /// Space for init
+    /// Space for init (bytes)
     space: ?usize = null,
+    
+    // New constraints:
+    
+    /// Realloc account to new space
+    realloc: ?usize = null,
+    /// Payer for realloc (if increasing size)
+    realloc_payer: ?[]const u8 = null,
+    /// Zero-initialize new space on realloc
+    realloc_zero: bool = true,
+    
+    /// Account must be executable (program)
+    executable: bool = false,
+    
+    /// Rent exempt enforcement
+    /// - null: no check
+    /// - true: enforce rent exempt
+    /// - false: skip check
+    rent_exempt: ?bool = null,
+    
+    /// Account data must be zeroed (uninitialized)
+    zero: bool = false,
+    
+    /// Explicit bump seed value for PDA
+    bump: ?u8 = null,
+    
+    /// Token account mint constraint
+    token_mint: ?PublicKey = null,
+    /// Token account authority constraint  
+    token_authority: ?[]const u8 = null,
+    
+    /// Mint account authority constraint
+    mint_authority: ?[]const u8 = null,
+    /// Mint account decimals constraint
+    mint_decimals: ?u8 = null,
 };
 
 // ============================================================================
@@ -647,6 +681,70 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
                         return error.ConstraintSeeds;
                     }
                 }
+
+                // Executable check
+                if (C.executable) {
+                    if (!acc.isExecutable()) return error.ConstraintExecutable;
+                }
+
+                // Rent exempt check
+                if (C.rent_exempt) |enforce| {
+                    if (enforce) {
+                        const lamports = acc.lamports().*;
+                        const data_len = acc.dataSlice().len;
+                        const min_balance = sol.rent.Rent.DEFAULT.minimumBalance(data_len);
+                        if (lamports < min_balance) return error.ConstraintRentExempt;
+                    }
+                }
+
+                // Zero check (account data must be all zeros)
+                if (C.zero) {
+                    const data = acc.dataSlice();
+                    for (data) |byte| {
+                        if (byte != 0) return error.ConstraintZero;
+                    }
+                }
+
+                // Token mint constraint
+                if (C.token_mint) |expected_mint| {
+                    // Token account data layout: mint is at offset 0 (32 bytes)
+                    const data = acc.dataSlice();
+                    if (data.len < 32) return error.AccountDataTooSmall;
+                    const mint_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr));
+                    if (!mint_ptr.equals(expected_mint)) return error.ConstraintTokenMint;
+                }
+
+                // Token authority constraint
+                if (C.token_authority) |auth_field| {
+                    // Token account data layout: owner/authority is at offset 32 (32 bytes)
+                    const data = acc.dataSlice();
+                    if (data.len < 64) return error.AccountDataTooSmall;
+                    const auth_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr + 32));
+                    const expected_auth = @field(self.accounts, auth_field);
+                    if (!auth_ptr.equals(expected_auth.id().*)) return error.ConstraintTokenAuthority;
+                }
+
+                // Mint authority constraint  
+                if (C.mint_authority) |auth_field| {
+                    // Mint data layout: mint_authority is at offset 0 (4 bytes option + 32 bytes)
+                    const data = acc.dataSlice();
+                    if (data.len < 36) return error.AccountDataTooSmall;
+                    // Check if authority is present (COption)
+                    const has_auth: *const u32 = @ptrCast(@alignCast(data.ptr));
+                    if (has_auth.* == 0) return error.ConstraintMintAuthority; // No authority
+                    const auth_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr + 4));
+                    const expected_auth = @field(self.accounts, auth_field);
+                    if (!auth_ptr.equals(expected_auth.id().*)) return error.ConstraintMintAuthority;
+                }
+
+                // Mint decimals constraint
+                if (C.mint_decimals) |expected_decimals| {
+                    // Mint data layout: decimals is at offset 44 (1 byte)
+                    const data = acc.dataSlice();
+                    if (data.len < 45) return error.AccountDataTooSmall;
+                    const decimals = data[44];
+                    if (decimals != expected_decimals) return error.ConstraintMintDecimals;
+                }
             }
         }
 
@@ -711,6 +809,65 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
 
                     // Transfer all lamports to destination
                     try closeAccount(acc, dest);
+                }
+            }
+        }
+
+        /// Process realloc constraints - resizes accounts with realloc = <new_size>
+        /// Call this when you need to resize account data
+        pub fn processRealloc(self: Self) !void {
+            inline for (fields) |field| {
+                const C = getConstraints(field.type);
+
+                if (C.realloc) |new_space| {
+                    const acc = @field(self.accounts, field.name);
+                    const current_len = acc.dataSlice().len;
+
+                    if (new_space != current_len) {
+                        // Calculate rent difference
+                        const current_rent = sol.rent.Rent.DEFAULT.minimumBalance(current_len);
+                        const new_rent = sol.rent.Rent.DEFAULT.minimumBalance(new_space);
+                        
+                        if (new_space > current_len) {
+                            // Increasing size - need to transfer lamports from payer
+                            const rent_diff = new_rent - current_rent;
+                            if (rent_diff > 0) {
+                                const payer_name = C.realloc_payer orelse @compileError("realloc requires realloc_payer when increasing size");
+                                const payer = @field(self.accounts, payer_name);
+                                
+                                // Transfer lamports
+                                const payer_lamports = payer.lamports();
+                                const acc_lamports = acc.lamports();
+                                if (payer_lamports.* < rent_diff) return error.InsufficientFunds;
+                                payer_lamports.* -= rent_diff;
+                                acc_lamports.* += rent_diff;
+                            }
+                        } else {
+                            // Decreasing size - refund to payer
+                            const rent_diff = current_rent - new_rent;
+                            if (rent_diff > 0) {
+                                if (C.realloc_payer) |payer_name| {
+                                    const payer = @field(self.accounts, payer_name);
+                                    const payer_lamports = payer.lamports();
+                                    const acc_lamports = acc.lamports();
+                                    payer_lamports.* += rent_diff;
+                                    acc_lamports.* -= rent_diff;
+                                }
+                            }
+                        }
+
+                        // Realloc the account data
+                        // Note: This uses the Solana runtime's realloc capability
+                        const data_ptr = acc.dataPtr();
+                        const result = sol.allocator.resize(data_ptr[0..current_len], new_space);
+                        if (result == null) return error.ReallocFailed;
+
+                        // Zero initialize new space if requested
+                        if (C.realloc_zero and new_space > current_len) {
+                            const new_data = result.?;
+                            @memset(new_data[current_len..], 0);
+                        }
+                    }
                 }
             }
         }
@@ -1144,6 +1301,87 @@ pub fn ProgramContext(comptime Accounts: type) type {
                     // Address check
                     if (C.address) |expected_addr| {
                         if (!account.id().equals(expected_addr)) return error.ConstraintAddress;
+                    }
+
+                    // Discriminator check
+                    if (C.discriminator) |expected_disc| {
+                        const data = account.dataSlice();
+                        if (data.len < 8) return error.AccountDataTooSmall;
+                        const actual: *const [8]u8 = @ptrCast(data.ptr);
+                        if (!std.mem.eql(u8, actual, &expected_disc)) {
+                            return error.AccountDiscriminatorMismatch;
+                        }
+                    }
+
+                    // Executable check
+                    if (C.executable) {
+                        if (!account.isExecutable()) return error.ConstraintExecutable;
+                    }
+
+                    // Rent exempt check
+                    if (C.rent_exempt) |enforce| {
+                        if (enforce) {
+                            const lamports = account.lamports().*;
+                            const data_len = account.dataSlice().len;
+                            const min_balance = sol.rent.Rent.DEFAULT.minimumBalance(data_len);
+                            if (lamports < min_balance) return error.ConstraintRentExempt;
+                        }
+                    }
+
+                    // Zero check
+                    if (C.zero) {
+                        const data = account.dataSlice();
+                        for (data) |byte| {
+                            if (byte != 0) return error.ConstraintZero;
+                        }
+                    }
+
+                    // Token mint constraint
+                    if (C.token_mint) |expected_mint| {
+                        const data = account.dataSlice();
+                        if (data.len < 32) return error.AccountDataTooSmall;
+                        const mint_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr));
+                        if (!mint_ptr.equals(expected_mint)) return error.ConstraintTokenMint;
+                    }
+
+                    // Token authority constraint
+                    if (C.token_authority) |auth_field| {
+                        const data = account.dataSlice();
+                        if (data.len < 64) return error.AccountDataTooSmall;
+                        const auth_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr + 32));
+                        const auth_idx = comptime blk: {
+                            for (fields, 0..) |f, idx| {
+                                if (std.mem.eql(u8, f.name, auth_field)) break :blk idx;
+                            }
+                            @compileError("token_authority account not found: " ++ auth_field);
+                        };
+                        const expected_auth = self.context.accounts[auth_idx];
+                        if (!auth_ptr.equals(expected_auth.id())) return error.ConstraintTokenAuthority;
+                    }
+
+                    // Mint authority constraint
+                    if (C.mint_authority) |auth_field| {
+                        const data = account.dataSlice();
+                        if (data.len < 36) return error.AccountDataTooSmall;
+                        const has_auth: *const u32 = @ptrCast(@alignCast(data.ptr));
+                        if (has_auth.* == 0) return error.ConstraintMintAuthority;
+                        const auth_ptr: *const PublicKey = @ptrCast(@alignCast(data.ptr + 4));
+                        const auth_idx = comptime blk: {
+                            for (fields, 0..) |f, idx| {
+                                if (std.mem.eql(u8, f.name, auth_field)) break :blk idx;
+                            }
+                            @compileError("mint_authority account not found: " ++ auth_field);
+                        };
+                        const expected_auth = self.context.accounts[auth_idx];
+                        if (!auth_ptr.equals(expected_auth.id())) return error.ConstraintMintAuthority;
+                    }
+
+                    // Mint decimals constraint
+                    if (C.mint_decimals) |expected_decimals| {
+                        const data = account.dataSlice();
+                        if (data.len < 45) return error.AccountDataTooSmall;
+                        const decimals = data[44];
+                        if (decimals != expected_decimals) return error.ConstraintMintDecimals;
                     }
                 }
                 _ = @field(accs, field.name);
