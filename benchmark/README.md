@@ -12,8 +12,9 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 | zig-raw (baseline)  | 5   | 1240 B  | baseline   | - |
 | **zero-cu-single**  | **5** | 1280 B | **ZERO!** | Single instruction |
 | **zero-cu-multi**   | **7** | 1392 B | **+2 CU** | Same account layout |
-| zero-cu-validated   | 5   | 1264 B  | ZERO!      | With constraints |
+| zero-cu-validated   | 5   | 1264 B  | ZERO!      | entry + constraints |
 | **zero-cu-program** | **19** | 1664 B | **+14 CU** | Different layouts |
+| program-validated   | 18  | 1584 B  | +13 CU     | program + constraints |
 
 ### Reference (solana-program-rosetta)
 
@@ -29,8 +30,10 @@ Test logic matches [solana-program-rosetta](https://github.com/solana-developers
 | API | CU | Binary Size | When to Use |
 |-----|-----|-------------|-------------|
 | `entry()` | 5 | ~1.3 KB | Single instruction, max performance |
+| `entryValidated()` | 5 | ~1.3 KB | Single instruction + constraints |
 | `multi()` | 7 | ~1.4 KB | Multiple instructions, same accounts |
 | `program()` | 19 | ~1.7 KB | Different account layouts per instruction |
+| `program()` + `ixValidated()` | 18 | ~1.6 KB | Different layouts + constraints |
 
 ## zero_cu API
 
@@ -110,13 +113,14 @@ npx tsx test_cu.ts
 
 ```
 benchmark/
-├── pubkey/                    # id == owner comparison
-│   ├── zig-raw/              # Raw Zig baseline (5 CU)
-│   ├── zero-cu-single/       # entry() API (5 CU)
-│   ├── zero-cu-multi/        # multi() API (7 CU)
-│   ├── zero-cu-validated/    # With constraints (5 CU)
-│   ├── zero-cu-program/      # program() API (19 CU)
-│   └── test_cu.ts            # CU measurement script
-├── helloworld/               # Hello world logging
-└── transfer-lamports/        # Lamport transfer
+├── pubkey/                         # id == owner comparison
+│   ├── zig-raw/                   # Raw Zig baseline (5 CU)
+│   ├── zero-cu-single/            # entry() API (5 CU)
+│   ├── zero-cu-multi/             # multi() API (7 CU)
+│   ├── zero-cu-validated/         # entryValidated() (5 CU)
+│   ├── zero-cu-program/           # program() API (19 CU)
+│   ├── zero-cu-program-validated/ # program() + ixValidated() (18 CU)
+│   └── test_cu.ts                 # CU measurement script
+├── helloworld/                    # Hello world logging
+└── transfer-lamports/             # Lamport transfer
 ```

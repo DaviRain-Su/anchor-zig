@@ -150,6 +150,7 @@ async function main() {
     { name: "zero-cu-multi", path: "zero-cu-multi/zig-out/lib/zero_cu_multi.so", disc: "check" },
     { name: "zero-cu-validated", path: "zero-cu-validated/zig-out/lib/zero_cu_validated.so", disc: "check" },
     { name: "zero-cu-program", path: "zero-cu-program/zig-out/lib/zero_cu_program.so", disc: "check" },
+    { name: "program-validated", path: "zero-cu-program-validated/zig-out/lib/zero_cu_program_validated.so", disc: "check" },
   ];
 
   console.log("║ Deploying and testing programs...                          ║");
