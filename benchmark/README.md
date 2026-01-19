@@ -149,7 +149,8 @@ Compares account id with owner id (32 bytes comparison).
 | Implementation     | CU Usage | Overhead  | Size     |
 |--------------------|----------|-----------|----------|
 | Raw Zig (baseline) | 5        | -         | 1.2 KB   |
-| Anchor-Zig         | 168      | +163 CU   | 7.9 KB   |
+| Anchor Ultra       | 18       | +13 CU    | 1.3 KB   |
+| Anchor Standard    | 168      | +163 CU   | 7.9 KB   |
 
 ### Reference (solana-program-rosetta)
 
@@ -158,7 +159,17 @@ Compares account id with owner id (32 bytes comparison).
 | Rust           | 14       |
 | **Zig**        | **15**   |
 
-**Our Raw Zig now beats the rosetta reference!** (5 vs 15 CU)
+**Our Raw Zig beats the rosetta reference!** (5 vs 15 CU)
+**Anchor Ultra provides Anchor-compatible discriminator with only +13 CU overhead!**
+
+### Overhead Analysis
+
+| Layer                    | CU Cost |
+|--------------------------|---------|
+| Discriminator check      | +13 CU  |
+| Context.load() parsing   | +26 CU  |
+| ProgramEntry dispatch    | +113 CU |
+| Account validation       | +11 CU  |
 
 ### Note on OptimizeMode
 

@@ -1,0 +1,17 @@
+.{
+    .name = .pubkey_anchor_ultra,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.0",
+    .fingerprint = 0x8731ccbfd8fa7701,
+    .dependencies = .{
+        .solana_program_sdk = .{
+            .path = "../../../../solana-program-sdk-zig",
+        },
+        .sol_anchor_zig = .{ .path = "../../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
