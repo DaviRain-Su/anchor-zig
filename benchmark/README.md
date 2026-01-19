@@ -101,32 +101,42 @@ See `counter/` in the main project for the full implementation.
 
 Transfers lamports from one account to another with amount specified in instruction data.
 
-### Results
+### Results (after SDK optimization)
 
 | Implementation     | CU Usage | Overhead  | Size     |
 |--------------------|----------|-----------|----------|
-| Raw Zig (baseline) | 94       | -         | 2.1 KB   |
-| Anchor-Zig Opt     | 171      | +77 CU    | 6.5 KB   |
-| Anchor-Zig         | 212      | +118 CU   | 8.1 KB   |
+| Raw Zig (baseline) | 38       | -         | 1.4 KB   |
+| Anchor-Zig Opt     | 166      | +128 CU   | 6.2 KB   |
+| Anchor-Zig         | 208      | +170 CU   | 7.8 KB   |
 
 ### Reference (solana-program-rosetta)
 
 | Implementation | CU Usage |
 |----------------|----------|
 | Rust           | 459      |
-| Zig            | 37       |
+| **Zig**        | **37**   |
 | C              | 104      |
 | Assembly       | 30       |
 | Pinocchio      | 28       |
 
-### Overhead Analysis
+**Our Raw Zig now matches the rosetta baseline!** (38 vs 37 CU)
 
-The Anchor-Zig overhead comes from:
-1. **Discriminator check**: ~6 CU
-2. **accountsToInfoSlice conversion**: ~20 CU (2 accounts)
-3. **Borsh deserialization**: ~10 CU
-4. **Account loading/validation**: ~40 CU (with InterfaceAccountInfo)
-5. **Context creation**: ~5 CU
+### SDK Fix
+
+The original SDK used heap allocation for accounts array, adding ~57 CU overhead.
+Fixed by using static [64]Account array (only 512 bytes on stack).
+
+### Anchor-Zig Overhead Analysis
+
+| Component                    | ~CU   |
+|------------------------------|-------|
+| Discriminator check          | 6     |
+| accountsToInfoSlice (2 acct) | 20    |
+| Borsh deserialization (u64)  | 10    |
+| Account loading/validation   | 40    |
+| Context creation             | 5     |
+| Other framework code         | 47    |
+| **Total**                    | ~128  |
 
 Using `RawAccount` wrapper (optimized version) removes account validation overhead.
 

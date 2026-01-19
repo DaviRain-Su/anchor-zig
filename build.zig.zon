@@ -5,8 +5,7 @@
     .fingerprint = 0x33c0a0bc61720bc7,
     .dependencies = .{
         .solana_program_sdk = .{
-            .url = "https://github.com/DaviRain-Su/solana-program-sdk-zig/archive/refs/heads/dev.tar.gz",
-            .hash = "solana_program_sdk-0.17.1-wGj9UJnsEQDeirc40nmzqeeqBifhPi_PZRZFnvTLS5_c",
+            .path = "../solana-program-sdk-zig",
         },
     },
     .paths = .{
