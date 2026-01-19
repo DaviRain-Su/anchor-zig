@@ -1531,7 +1531,7 @@ pub fn program(comptime handlers: anytype) void {
                         ctx.validate() catch return 1;
                     }
 
-                    if (H.handlerFn(&ctx)) |_| {
+                    if (H.handlerFn(ctx)) |_| {
                         return 0;
                     } else |_| {
                         return 1;
