@@ -257,9 +257,9 @@ pub fn singleInstructionEntrypoint(
     }.entry;
 }
 
-/// Macro-like helper to generate and export entrypoint
+/// Export entrypoint for a single instruction program
 /// 
-/// Usage for single instruction:
+/// Usage:
 /// ```zig
 /// comptime {
 ///     zero.exportSingleInstruction(CheckAccounts, "check", Program.check);
@@ -272,4 +272,193 @@ pub fn exportSingleInstruction(
 ) void {
     const entry_fn = singleInstructionEntrypoint(Accounts, inst_name, handler);
     @export(&entry_fn, .{ .name = "entrypoint" });
+}
+
+/// Instruction definition for multi-instruction programs
+pub fn Instruction(
+    comptime Accounts: type,
+    comptime handler: fn (ZeroInstructionContext(Accounts)) anyerror!void,
+) type {
+    return struct {
+        pub const AccountsType = Accounts;
+        pub const handlerFn = handler;
+    };
+}
+
+/// Export entrypoint for a multi-instruction program using inline definition
+/// 
+/// Usage:
+/// ```zig
+/// comptime {
+///     zero.exportInstructions(.{
+///         .initialize = zero.Instruction(InitAccounts, Program.initialize),
+///         .transfer = zero.Instruction(TransferAccounts, Program.transfer),
+///     });
+/// }
+/// ```
+pub fn exportInstructions(comptime instructions: anytype) void {
+    const entry_fn = multiInstructionEntrypoint(instructions);
+    @export(&entry_fn, .{ .name = "entrypoint" });
+}
+
+fn multiInstructionEntrypoint(comptime instructions: anytype) fn ([*]u8) callconv(.c) u64 {
+    return struct {
+        fn entry(input: [*]u8) callconv(.c) u64 {
+            return dispatch(input);
+        }
+
+        fn dispatch(input: [*]u8) u64 {
+            const fields = @typeInfo(@TypeOf(instructions)).@"struct".fields;
+
+            inline for (fields) |field| {
+                const InstType = field.type;
+                if (tryDispatchInst(InstType, field.name, input)) |result| {
+                    return result;
+                }
+            }
+
+            return 1;
+        }
+
+        fn tryDispatchInst(comptime InstType: type, comptime name: []const u8, input: [*]u8) ?u64 {
+            if (!@hasDecl(InstType, "AccountsType") or !@hasDecl(InstType, "handlerFn")) {
+                return null;
+            }
+
+            const Accounts = InstType.AccountsType;
+            const Ctx = ZeroInstructionContext(Accounts);
+
+            const expected_disc = discriminator_mod.instructionDiscriminator(name);
+            const expected_u64: u64 = @bitCast(expected_disc);
+            const actual: *align(1) const u64 = @ptrCast(input + Ctx.ix_data_offset);
+
+            if (actual.* != expected_u64) {
+                return null;
+            }
+
+            const ctx = Ctx.load(input);
+            if (InstType.handlerFn(ctx)) |_| {
+                return 0;
+            } else |_| {
+                return 1;
+            }
+        }
+    }.entry;
+}
+
+/// Generate multi-instruction entrypoint with shared account layout
+/// 
+/// All instructions must use the same Accounts type.
+/// 
+/// Usage:
+/// ```zig
+/// comptime {
+///     zero.exportMultiInstruction(ProgramAccounts, .{
+///         .{ "check", Program.check },
+///         .{ "verify", Program.verify },
+///     });
+/// }
+/// ```
+pub fn exportMultiInstruction(
+    comptime Accounts: type,
+    comptime handlers: anytype,
+) void {
+    const Ctx = ZeroInstructionContext(Accounts);
+
+    const S = struct {
+        fn entry(input: [*]u8) callconv(.c) u64 {
+            const disc: *align(1) const u64 = @ptrCast(input + Ctx.ix_data_offset);
+            const ctx = Ctx.load(input);
+
+            inline for (handlers) |h| {
+                const name: []const u8 = h.@"0";
+                const handler = h.@"1";
+                const expected: u64 = @bitCast(discriminator_mod.instructionDiscriminator(name));
+                if (disc.* == expected) {
+                    if (handler(ctx)) |_| return 0 else |_| return 1;
+                }
+            }
+
+            return 1;
+        }
+    };
+
+    @export(&S.entry, .{ .name = "entrypoint" });
+}
+
+/// Export entrypoint from a Program struct definition
+/// 
+/// The Program struct must have:
+/// - `instructions` struct with instruction definitions
+/// - Handler functions matching instruction names
+///
+/// Usage:
+/// ```zig
+/// pub const Program = struct {
+///     pub const id = ...;
+///     
+///     pub const instructions = struct {
+///         pub const initialize = struct { pub const Accounts = InitAccounts; };
+///         pub const transfer = struct { pub const Accounts = TransferAccounts; };
+///     };
+///     
+///     pub fn initialize(ctx: zero.Context(InitAccounts)) !void { ... }
+///     pub fn transfer(ctx: zero.Context(TransferAccounts)) !void { ... }
+/// };
+///
+/// comptime { zero.exportProgramStruct(Program); }
+/// ```
+pub fn exportProgramStruct(comptime ProgramDef: type) void {
+    const entry_fn = programStructEntrypoint(ProgramDef);
+    @export(&entry_fn, .{ .name = "entrypoint" });
+}
+
+fn programStructEntrypoint(comptime ProgramDef: type) fn ([*]u8) callconv(.c) u64 {
+    return struct {
+        fn entry(input: [*]u8) callconv(.c) u64 {
+            return dispatch(input);
+        }
+
+        fn dispatch(input: [*]u8) u64 {
+            const InstructionsType = ProgramDef.instructions;
+            const decls = @typeInfo(InstructionsType).@"struct".decls;
+
+            inline for (decls) |decl| {
+                if (tryDispatchDecl(decl.name, input)) |result| {
+                    return result;
+                }
+            }
+
+            return 1;
+        }
+
+        fn tryDispatchDecl(comptime name: []const u8, input: [*]u8) ?u64 {
+            const InstructionsType = ProgramDef.instructions;
+            const InstType = @field(InstructionsType, name);
+
+            if (!@hasDecl(InstType, "Accounts")) {
+                return null;
+            }
+
+            const Accounts = InstType.Accounts;
+            const Ctx = ZeroInstructionContext(Accounts);
+
+            const expected_disc = discriminator_mod.instructionDiscriminator(name);
+            const expected_u64: u64 = @bitCast(expected_disc);
+            const actual: *align(1) const u64 = @ptrCast(input + Ctx.ix_data_offset);
+
+            if (actual.* != expected_u64) {
+                return null;
+            }
+
+            const ctx = Ctx.load(input);
+            const handler = @field(ProgramDef, name);
+
+            if (handler(ctx)) |_| {
+                return 0;
+            } else |_| {
+                return 1;
+            }
+        }
+    }.entry;
 }
