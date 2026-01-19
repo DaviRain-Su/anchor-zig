@@ -288,7 +288,10 @@ pub const ZeroReadonly = Readonly;
 // ============================================================================
 
 pub fn accountSize(comptime data_len: usize) usize {
-    const raw_size = ACCOUNT_HEADER_SIZE + data_len + ACCOUNT_DATA_PADDING;
+    // Match SDK's context.zig parsing:
+    // ptr += Account.DATA_HEADER + data.data_len + ACCOUNT_DATA_PADDING + @sizeOf(u64);
+    // The extra @sizeOf(u64) is for the rent_epoch field after account data
+    const raw_size = ACCOUNT_HEADER_SIZE + data_len + ACCOUNT_DATA_PADDING + 8;
     return std.mem.alignForward(usize, raw_size, 8);
 }
 

@@ -17,12 +17,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { execSync } from "node:child_process";
 
 interface ProgramConfig {
   name: string;
   soPath: string;
-  keypairPath: string;
-  isAnchor: boolean;
+  useDisc: boolean;
 }
 
 function anchorDiscriminator(name: string): Buffer {
@@ -31,58 +31,35 @@ function anchorDiscriminator(name: string): Buffer {
   return hash.subarray(0, 8);
 }
 
-function buildInstructionData(amount: bigint, isAnchor: boolean): Buffer {
+function buildInstructionData(amount: bigint, useDisc: boolean): Buffer {
   const amountBuf = Buffer.alloc(8);
   amountBuf.writeBigUInt64LE(amount);
   
-  if (isAnchor) {
+  if (useDisc) {
     return Buffer.concat([anchorDiscriminator("transfer"), amountBuf]);
   }
   return amountBuf;
 }
 
-async function getCU(connection: Connection, signature: string): Promise<number> {
-  const tx = await connection.getTransaction(signature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  return tx?.meta?.computeUnitsConsumed || 0;
-}
-
-async function deployProgram(
-  programPath: string,
-  keypairPath: string
-): Promise<PublicKey | null> {
-  const { execSync } = await import("node:child_process");
-  
-  if (!fs.existsSync(programPath)) {
+function deployProgram(soPath: string): string | null {
+  if (!fs.existsSync(soPath)) {
     return null;
   }
   
-  if (!fs.existsSync(keypairPath)) {
-    const kp = Keypair.generate();
-    fs.writeFileSync(keypairPath, JSON.stringify(Array.from(kp.secretKey)));
-  }
-  
   try {
-    execSync(
-      `solana program deploy ${programPath} --program-id ${keypairPath} --url http://localhost:8899 2>&1`,
-      { encoding: "utf8" }
-    );
-  } catch (err: any) {
-    // Already deployed
+    const result = execSync(`solana program deploy ${soPath} 2>&1`, { encoding: "utf8" });
+    const match = result.match(/Program Id: (\w+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
   }
-    
-  const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf8"));
-  const keypair = Keypair.fromSecretKey(Uint8Array.from(keypairData));
-  return keypair.publicKey;
 }
 
 async function testTransfer(
   connection: Connection,
   payer: Keypair,
   programId: PublicKey,
-  isAnchor: boolean
+  useDisc: boolean
 ): Promise<number> {
   // Create source account owned by the program
   const source = Keypair.generate();
@@ -115,100 +92,95 @@ async function testTransfer(
   });
   
   // Now do the transfer
-  const data = buildInstructionData(transferAmount, isAnchor);
+  const data = buildInstructionData(transferAmount, useDisc);
   
   const transferIx = new TransactionInstruction({
     programId,
     keys: [
-      { pubkey: source.publicKey, isSigner: false, isWritable: true },
+      { pubkey: source.publicKey, isSigner: true, isWritable: true },
       { pubkey: destination.publicKey, isSigner: false, isWritable: true },
     ],
     data,
   });
 
   const tx = new Transaction().add(transferIx);
-  const signature = await sendAndConfirmTransaction(connection, tx, [payer], {
-    commitment: "confirmed",
-  });
+  tx.feePayer = payer.publicKey;
+  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  tx.sign(payer, source);
 
-  return await getCU(connection, signature);
+  const simResult = await connection.simulateTransaction(tx);
+  return simResult.value.unitsConsumed || 0;
 }
 
 async function main() {
-  const url = "http://127.0.0.1:8899";
-  const connection = new Connection(url, "confirmed");
+  const connection = new Connection("http://127.0.0.1:8899", "confirmed");
 
   const walletPath = path.join(os.homedir(), ".config", "solana", "id.json");
   const secret = Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf8")));
   const payer = Keypair.fromSecretKey(secret);
 
   console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║         Transfer Lamports CU Benchmark - Anchor-Zig          ║");
+  console.log("║         Transfer Lamports CU Benchmark - anchor-zig          ║");
   console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
   const programs: ProgramConfig[] = [
     {
-      name: "Raw Zig",
+      name: "zig-raw (baseline)",
       soPath: "zig-raw/zig-out/lib/transfer_zig.so",
-      keypairPath: "/tmp/transfer-zig-raw.json",
-      isAnchor: false,
+      useDisc: false,
     },
     {
-      name: "Anchor-Zig",
-      soPath: "anchor-zig/zig-out/lib/transfer_anchor.so",
-      keypairPath: "/tmp/transfer-anchor.json",
-      isAnchor: true,
-    },
-    {
-      name: "Anchor-Zig Opt",
-      soPath: "anchor-zig-optimized/zig-out/lib/transfer_anchor_opt.so",
-      keypairPath: "/tmp/transfer-anchor-opt.json",
-      isAnchor: true,
+      name: "zero-cu",
+      soPath: "zero-cu/zig-out/lib/transfer_zero_cu.so",
+      useDisc: true,
     },
   ];
 
-  console.log("📦 Deploying programs...\n");
+  console.log("📦 Deploying and testing programs...\n");
   
   const results: { name: string; cu: number; size: number }[] = [];
   
   for (const prog of programs) {
-    const id = await deployProgram(prog.soPath, prog.keypairPath);
-    if (!id) {
+    const size = fs.existsSync(prog.soPath) ? fs.statSync(prog.soPath).size : 0;
+    if (size === 0) {
       console.log(`  ⚠ ${prog.name}: not found`);
+      continue;
+    }
+
+    const id = deployProgram(prog.soPath);
+    if (!id) {
+      console.log(`  ⚠ ${prog.name}: deploy failed`);
       continue;
     }
     
     console.log(`  Testing ${prog.name}...`);
-    const cu = await testTransfer(connection, payer, id, prog.isAnchor);
-    const size = fs.statSync(prog.soPath).size;
+    const cu = await testTransfer(connection, payer, new PublicKey(id), prog.useDisc);
     results.push({ name: prog.name, cu, size });
-    console.log(`  ✓ ${prog.name}: ${cu} CU (${(size / 1024).toFixed(1)} KB)`);
+    console.log(`  ✓ ${prog.name}: ${cu} CU (${size} bytes)`);
   }
 
   if (results.length >= 2) {
-    const raw = results[0];
+    const baseline = results[0].cu;
     
-    console.log("\n┌─────────────────┬──────────┬────────────┬──────────┐");
-    console.log("│ Implementation  │ CU Usage │ Overhead   │ Size     │");
-    console.log("├─────────────────┼──────────┼────────────┼──────────┤");
+    console.log("\n╔════════════════════════════════════════════════════════════╗");
+    console.log("║ Implementation        │ CU      │ Size    │ Overhead      ║");
+    console.log("╠═══════════════════════╪═════════╪═════════╪═══════════════╣");
     
     for (const r of results) {
-      const overhead = r.cu - raw.cu;
-      const overheadStr = overhead === 0 ? "baseline" : `+${overhead} CU`;
-      console.log(`│ ${r.name.padEnd(15)} │ ${r.cu.toString().padStart(8)} │ ${overheadStr.padStart(10)} │ ${(r.size / 1024).toFixed(1).padStart(5)} KB │`);
+      const overhead = r.cu === baseline ? "baseline" : `+${r.cu - baseline} CU`;
+      console.log(`║ ${r.name.padEnd(21)} │ ${r.cu.toString().padStart(7)} │ ${(r.size + " B").padStart(7)} │ ${overhead.padStart(13)} ║`);
     }
-    console.log("└─────────────────┴──────────┴────────────┴──────────┘");
     
-    console.log("\n📚 Reference (solana-program-rosetta):");
-    console.log("┌─────────────────┬──────────┐");
-    console.log("│ Implementation  │ CU Usage │");
-    console.log("├─────────────────┼──────────┤");
-    console.log("│ Rust            │      459 │");
-    console.log("│ Zig             │       37 │");
-    console.log("│ C               │      104 │");
-    console.log("│ Assembly        │       30 │");
-    console.log("│ Pinocchio       │       28 │");
-    console.log("└─────────────────┴──────────┘");
+    console.log("╚════════════════════════════════════════════════════════════╝");
+    
+    console.log("\n📊 Summary:");
+    console.log(`   • Raw Zig baseline: ${results[0].cu} CU`);
+    console.log(`   • zero-cu: ${results[1].cu} CU (+${results[1].cu - results[0].cu} CU overhead)`);
+    
+    console.log("\n📚 Reference (solana-program-rosetta transfer-lamports):");
+    console.log("   • Rust:     459 CU");
+    console.log("   • Zig:       37 CU");
+    console.log("   • Pinocchio: 28 CU");
   }
 }
 
