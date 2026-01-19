@@ -649,6 +649,79 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
                 }
             }
         }
+
+        /// Process init constraints - creates accounts with init = true
+        /// Call this BEFORE your handler logic
+        pub fn processInit(self: Self) !void {
+            inline for (fields) |field| {
+                const C = getConstraints(field.type);
+
+                if (C.init) {
+                    const acc = @field(self.accounts, field.name);
+
+                    // Get payer account
+                    const payer_name = C.payer orelse @compileError("init requires payer");
+                    const payer = @field(self.accounts, payer_name);
+
+                    // Calculate space
+                    const space = C.space orelse blk: {
+                        // Default: use data_size from account type + 8 for discriminator
+                        if (@hasDecl(field.type, "data_size")) {
+                            break :blk field.type.data_size + 8;
+                        } else {
+                            @compileError("init requires space or typed account");
+                        }
+                    };
+
+                    // Check if account already initialized (has lamports)
+                    if (acc.lamports().* > 0) {
+                        // Account exists, just verify it's empty/zeroed
+                        continue;
+                    }
+
+                    // Create the account via CPI
+                    try createAccount(
+                        payer,
+                        acc,
+                        space,
+                        self.programId().*,
+                    );
+
+                    // Write discriminator if defined
+                    if (C.discriminator) |disc| {
+                        const data = acc.dataSlice();
+                        if (data.len >= 8) {
+                            const disc_ptr: *[8]u8 = @ptrCast(@constCast(data.ptr));
+                            disc_ptr.* = disc;
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Process close constraints - closes accounts with close = "destination"
+        /// Call this AFTER your handler logic
+        pub fn processClose(self: Self) !void {
+            inline for (fields) |field| {
+                const C = getConstraints(field.type);
+
+                if (C.close) |dest_name| {
+                    const acc = @field(self.accounts, field.name);
+                    const dest = @field(self.accounts, dest_name);
+
+                    // Transfer all lamports to destination
+                    try closeAccount(acc, dest);
+                }
+            }
+        }
+
+        /// Helper to get constraints from account type
+        fn getConstraints(comptime T: type) AccountConstraints {
+            if (@hasDecl(T, "CONSTRAINTS")) {
+                return T.CONSTRAINTS;
+            }
+            return .{};
+        }
     };
 }
 
@@ -1074,6 +1147,103 @@ pub fn ProgramContext(comptime Accounts: type) type {
                     }
                 }
                 _ = @field(accs, field.name);
+            }
+        }
+
+        /// Process init constraints - creates accounts with init = true
+        /// Call this BEFORE your handler logic
+        pub fn processInit(self: *const Self) !void {
+            inline for (fields, 0..) |field, i| {
+                if (@hasDecl(field.type, "CONSTRAINTS")) {
+                    const C = field.type.CONSTRAINTS;
+
+                    if (C.init) {
+                        const account = self.context.accounts[i];
+
+                        // Get payer account
+                        const payer_name = C.payer orelse @compileError("init requires payer");
+                        const payer_idx = comptime blk: {
+                            for (fields, 0..) |f, idx| {
+                                if (std.mem.eql(u8, f.name, payer_name)) break :blk idx;
+                            }
+                            @compileError("payer account not found: " ++ payer_name);
+                        };
+                        const payer = self.context.accounts[payer_idx];
+
+                        // Calculate space
+                        const space: u64 = C.space orelse blk: {
+                            if (@hasDecl(field.type, "data_size")) {
+                                break :blk field.type.data_size + 8;
+                            } else {
+                                @compileError("init requires space or typed account");
+                            }
+                        };
+
+                        // Check if account already initialized
+                        if (account.lamports().* > 0) continue;
+
+                        // Create account via CPI
+                        const payer_info = payer.info();
+                        const account_info = account.info();
+                        
+                        const lamports = sol.rent.Rent.DEFAULT.minimumBalance(space);
+                        
+                        const create_ix = sol.system_instruction.createAccount(
+                            payer_info.id.*,
+                            account_info.id.*,
+                            lamports,
+                            space,
+                            self.context.program_id.*,
+                        );
+                        
+                        if (create_ix.invokeSigned(&.{ payer_info, account_info }, &.{})) |err| {
+                            _ = err;
+                            return error.InitFailed;
+                        }
+
+                        // Write discriminator if defined
+                        if (C.discriminator) |disc| {
+                            const data = account.dataSlice();
+                            if (data.len >= 8) {
+                                const disc_ptr: *[8]u8 = @ptrCast(@constCast(data.ptr));
+                                disc_ptr.* = disc;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Process close constraints - closes accounts with close = "destination"
+        /// Call this AFTER your handler logic
+        pub fn processClose(self: *const Self) !void {
+            inline for (fields, 0..) |field, i| {
+                if (@hasDecl(field.type, "CONSTRAINTS")) {
+                    const C = field.type.CONSTRAINTS;
+
+                    if (C.close) |dest_name| {
+                        const account = self.context.accounts[i];
+
+                        // Get destination account
+                        const dest_idx = comptime blk: {
+                            for (fields, 0..) |f, idx| {
+                                if (std.mem.eql(u8, f.name, dest_name)) break :blk idx;
+                            }
+                            @compileError("close destination not found: " ++ dest_name);
+                        };
+                        const dest = self.context.accounts[dest_idx];
+
+                        // Transfer lamports
+                        const account_lamports = account.lamports();
+                        const dest_lamports = dest.lamports();
+                        dest_lamports.* += account_lamports.*;
+                        account_lamports.* = 0;
+
+                        // Zero out data
+                        const data = account.dataSlice();
+                        @memset(@constCast(data), 0);
+                    }
+                }
             }
         }
     };

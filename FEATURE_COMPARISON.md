@@ -43,8 +43,8 @@
 | `#[account(address = <pubkey>)]` | `.address = PUBKEY` | ✅ | 地址验证 |
 | `#[account(seeds = [...], bump)]` | `.seeds = &.{...}` | ✅ | PDA 验证 |
 | `#[account(has_one = <field>)]` | `.has_one = &.{"field"}` | ✅ | 字段匹配 |
-| `#[account(init, payer = <acc>, space = N)]` | `.init = true, .payer = "acc"` | ⚠️ | 部分实现 |
-| `#[account(close = <acc>)]` | `.close = "acc"` | ⚠️ | 定义存在，需验证 |
+| `#[account(init, payer = <acc>, space = N)]` | `.init = true, .payer = "acc"` | ✅ | `processInit()` |
+| `#[account(close = <acc>)]` | `.close = "acc"` | ✅ | `processClose()` |
 | `#[account(realloc = N, ...)]` | ❌ | ❌ | 重新分配空间 |
 | `#[account(constraint = <expr>)]` | ❌ | ❌ | 自定义约束表达式 |
 | `#[account(rent_exempt = ...)]` | ❌ | ❌ | 租金豁免检查 |
