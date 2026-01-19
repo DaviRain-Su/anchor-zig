@@ -190,6 +190,79 @@ pub fn accountDataLengths(comptime Accounts: type) []const usize {
     return &result;
 }
 
+/// Zero-overhead instruction context with named account access
+///
+/// Usage:
+/// ```zig
+/// const MyAccounts = struct {
+///     source: ZeroSigner(8),
+///     dest: ZeroMut(0),
+/// };
+///
+/// fn handler(ctx: ZeroInstructionContext(MyAccounts)) !void {
+///     const source = ctx.accounts.source;  // Named access!
+///     const dest = ctx.accounts.dest;
+/// }
+/// ```
+pub fn ZeroInstructionContext(comptime Accounts: type) type {
+    const data_lens = accountDataLengths(Accounts);
+    const fields = std.meta.fields(Accounts);
+
+    // Generate named account accessor struct
+    const AccountsAccessor = blk: {
+        var acc_fields: [fields.len]std.builtin.Type.StructField = undefined;
+        inline for (fields, 0..) |field, i| {
+            const AccType = ZeroAccount(i, data_lens);
+            acc_fields[i] = .{
+                .name = field.name,
+                .type = AccType,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(AccType),
+            };
+        }
+        break :blk @Type(.{
+            .@"struct" = .{
+                .layout = .auto,
+                .fields = &acc_fields,
+                .decls = &.{},
+                .is_tuple = false,
+            },
+        });
+    };
+
+    return struct {
+        input: [*]const u8,
+        accounts: AccountsAccessor,
+
+        const Self = @This();
+        pub const ix_data_offset = instructionDataOffset(data_lens);
+
+        pub fn load(input: [*]const u8) Self {
+            var acc: AccountsAccessor = undefined;
+            inline for (fields) |field| {
+                @field(acc, field.name) = .{ .input = input };
+            }
+            return .{
+                .input = input,
+                .accounts = acc,
+            };
+        }
+
+        /// Get instruction args (after 8-byte discriminator)
+        pub fn args(self: Self, comptime T: type) *const T {
+            return @ptrCast(@alignCast(self.input + ix_data_offset + 8));
+        }
+
+        /// Check discriminator
+        pub fn checkDiscriminator(self: Self, comptime expected: [8]u8) bool {
+            const expected_u64: u64 = @bitCast(expected);
+            const actual: *align(1) const u64 = @ptrCast(self.input + ix_data_offset);
+            return actual.* == expected_u64;
+        }
+    };
+}
+
 /// Create a zero-overhead program dispatcher
 pub fn ZeroDispatch(
     comptime Accounts: type,

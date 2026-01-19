@@ -1028,6 +1028,41 @@ pub const ReallocError = realloc.ReallocError;
 /// ```
 pub const zero_cu = @import("zero_cu.zig");
 
+/// Zero-CU Program Framework
+///
+/// Provides Anchor-style program definition with zero runtime overhead.
+///
+/// Example:
+/// ```zig
+/// const anchor = @import("sol_anchor_zig");
+/// const zero = anchor.zero_cu;
+///
+/// const TransferAccounts = struct {
+///     from: zero.ZeroSigner(0),
+///     to: zero.ZeroMut(0),
+/// };
+///
+/// pub const Program = struct {
+///     pub const id = anchor.sdk.PublicKey.comptimeFromBase58("...");
+///
+///     pub const instructions = struct {
+///         pub const transfer = struct {
+///             pub const Accounts = TransferAccounts;
+///             pub const Args = void;
+///         };
+///     };
+///
+///     pub fn transfer(ctx: anchor.zero_cu.ZeroInstructionContext(TransferAccounts)) !void {
+///         // Zero-overhead account access
+///     }
+/// };
+///
+/// comptime {
+///     anchor.zero_program.Program(Program).exportEntrypoint();
+/// }
+/// ```
+pub const zero_program = @import("zero_program.zig");
+
 // ============================================================================
 // Tests
 // ============================================================================
