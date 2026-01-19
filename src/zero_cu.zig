@@ -1615,8 +1615,15 @@ pub fn ProgramContext(comptime Accounts: type) type {
         pub const AccountsAccessor = blk: {
             var acc_fields: [fields.len]std.builtin.Type.StructField = undefined;
             for (fields, 0..) |field, i| {
+                // Extract DataType from the account field type if available
+                const DataType = if (@hasDecl(field.type, "DataType")) field.type.DataType else void;
+                const has_typed_data = if (@hasDecl(field.type, "has_typed_data")) field.type.has_typed_data else false;
+
                 const RefType = struct {
                     ctx: *const Self,
+
+                    // Typed data size constant for discriminator offset
+                    const DATA_OFFSET: usize = 8; // Skip 8-byte discriminator
 
                     pub fn id(ref: @This()) *const PublicKey {
                         return &ref.ctx.context.accounts[i].ptr.id;
@@ -1633,9 +1640,23 @@ pub fn ProgramContext(comptime Accounts: type) type {
                     pub fn dataSlice(ref: @This()) []u8 {
                         return ref.ctx.context.accounts[i].data();
                     }
-                    
+
                     pub fn data(ref: @This()) []u8 {
                         return ref.ctx.context.accounts[i].data();
+                    }
+
+                    /// Get typed readonly access to account data (skips discriminator)
+                    pub fn get(ref: @This()) if (has_typed_data) *const DataType else noreturn {
+                        if (!has_typed_data) @compileError("No typed data for this account");
+                        const raw = ref.ctx.context.accounts[i].data();
+                        return @ptrCast(@alignCast(raw.ptr + DATA_OFFSET));
+                    }
+
+                    /// Get typed mutable access to account data (skips discriminator)
+                    pub fn getMut(ref: @This()) if (has_typed_data) *DataType else noreturn {
+                        if (!has_typed_data) @compileError("No typed data for this account");
+                        const raw = ref.ctx.context.accounts[i].data();
+                        return @ptrCast(@alignCast(raw.ptr + DATA_OFFSET));
                     }
 
                     pub fn isSigner(ref: @This()) bool {
