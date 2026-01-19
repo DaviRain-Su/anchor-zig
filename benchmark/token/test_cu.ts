@@ -414,10 +414,9 @@ async function runBenchmarks() {
   console.log("   • Zig (rosetta): Transfer=124, MintTo=133, Burn=123, Close=114 CU");
   console.log("");
   console.log("🎯 Summary:");
-  console.log("   • zig-raw: closest to rosetta Zig baseline");
-  console.log("   • zero-cu: uses SDK types for type safety (+25-35 CU)");
-  console.log("   • anchor-spl: uses spl.token wrappers (+60-70 CU vs raw)");
-  console.log("   • All implementations are 8-14x faster than Rust!");
+  console.log("   • zig-raw: direct implementation, matches rosetta pattern");
+  console.log("   • anchor-spl: uses Context.load() for dynamic account parsing");
+  console.log("   • All implementations are 10-15x faster than Rust!");
 }
 
 runBenchmarks().catch(console.error);

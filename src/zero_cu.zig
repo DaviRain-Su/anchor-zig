@@ -397,6 +397,20 @@ pub fn ZeroAccountTyped(
             return (self.input + DATA_OFFSET)[0..len_ptr.*];
         }
 
+        /// Assign the account to a new owner
+        pub inline fn assign(self: Self, owner: PublicKey) void {
+            const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
+            const owner_ptr: *[32]u8 = @ptrCast(ptr + OWNER_OFFSET);
+            @memcpy(owner_ptr, &owner.bytes);
+        }
+
+        /// Realloc account data without checks (used for closing accounts)
+        pub inline fn reallocUnchecked(self: Self, new_len: u64) void {
+            const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
+            const len_ptr: *u64 = @ptrCast(@alignCast(ptr + DATA_LEN_OFFSET));
+            len_ptr.* = new_len;
+        }
+
         // Manual validation methods
         pub inline fn verifyOwner(self: Self, expected: PublicKey) !void {
             if (!self.ownerId().equals(expected)) return error.ConstraintOwner;
@@ -528,6 +542,12 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
 
         pub inline fn rawData(self: Self) [*]const u8 {
             return self.input + ix_data_offset;
+        }
+
+        /// Get instruction data as a slice
+        pub inline fn ixDataSlice(self: Self) []const u8 {
+            const data_len_ptr: *const u64 = @ptrCast(@alignCast(self.input + ix_data_offset - 8));
+            return (self.input + ix_data_offset)[0..data_len_ptr.*];
         }
 
         pub inline fn programId(self: Self) *const PublicKey {
