@@ -35,24 +35,22 @@ pub const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("9YVfTx1E16vs7pzSSfC8wuq
 // ============================================================================
 
 /// Counter account data (8 bytes)
+/// Used with discriminator: total account size = 8 (disc) + 8 (count) = 16 bytes
 pub const CounterData = extern struct {
     /// Current count value
     count: u64,
 };
 
-// Counter data size (8 bytes discriminator + 8 bytes count)
-const COUNTER_SIZE = 8 + @sizeOf(CounterData);
-
 // ============================================================================
-// Instruction Accounts
+// Instruction Accounts (using typed data access)
 // ============================================================================
 
 /// Accounts for initialize instruction
 pub const InitializeAccounts = struct {
     /// Payer for account creation (must be signer, writable)
     payer: zero.Signer(0),
-    /// Counter account to initialize (writable)
-    counter: zero.Mut(COUNTER_SIZE),
+    /// Counter account to initialize (writable, typed as CounterData)
+    counter: zero.Mut(CounterData),
     /// System program for account creation (renamed to avoid dynamic parsing)
     sys_account: zero.Readonly(0),
 };
@@ -61,16 +59,16 @@ pub const InitializeAccounts = struct {
 pub const IncrementAccounts = struct {
     /// Authority who can increment (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to modify (writable)
-    counter: zero.Mut(COUNTER_SIZE),
+    /// Counter account to modify (writable, typed as CounterData)
+    counter: zero.Mut(CounterData),
 };
 
 /// Accounts for close instruction
 pub const CloseAccounts = struct {
     /// Authority who can close (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to close
-    counter: zero.Mut(COUNTER_SIZE),
+    /// Counter account to close (typed as CounterData)
+    counter: zero.Mut(CounterData),
     /// Destination for remaining lamports
     destination: zero.Mut(0),
 };
@@ -138,45 +136,35 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Instruction Handlers (using zero.Ctx - value type API)
+// Instruction Handlers (using zero.Ctx with typed data access)
 // ============================================================================
 
 /// Initialize a new counter account
 fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
     const args = ctx.args(InitializeArgs);
     
-    // Get counter data pointer (skip 8-byte discriminator)
-    const counter_data = ctx.accounts.counter.dataSlice();
-    if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
+    // Write discriminator using helper function
+    zero.writeDiscriminator(ctx.accounts.counter, "Counter");
     
-    // Write discriminator
-    const disc = anchor.discriminator.accountDiscriminator("Counter");
-    const disc_ptr: *[8]u8 = @ptrCast(@constCast(counter_data.ptr));
-    @memcpy(disc_ptr, &disc);
-    
-    // Write initial count
-    const count_ptr: *align(1) u64 = @ptrCast(@constCast(counter_data.ptr + 8));
-    count_ptr.* = args.initial;
+    // Get typed mutable access to counter data (auto-skips discriminator)
+    const counter = ctx.accounts.counter.getMut();
+    counter.count = args.initial;
 }
 
 /// Increment the counter
 fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
     const args = ctx.args(IncrementArgs);
     
-    // Get counter data
-    const counter_data = ctx.accounts.counter.dataSlice();
-    if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
-    
-    // Read current count
-    const count_ptr: *align(1) u64 = @ptrCast(@constCast(counter_data.ptr + 8));
+    // Get typed mutable access to counter data
+    const counter = ctx.accounts.counter.getMut();
     
     // Check for overflow
-    const new_count = @addWithOverflow(count_ptr.*, args.amount);
+    const new_count = @addWithOverflow(counter.count, args.amount);
     if (new_count[1] != 0) {
         return error.CounterOverflow;
     }
 
-    count_ptr.* = new_count[0];
+    counter.count = new_count[0];
 }
 
 /// Close the counter account
@@ -188,9 +176,9 @@ fn close(ctx: zero.Ctx(CloseAccounts)) !void {
     dest_lamports.* += counter_lamports.*;
     counter_lamports.* = 0;
     
-    // Zero out counter data and assign to system program
-    const counter_data = ctx.accounts.counter.dataSlice();
-    @memset(@constCast(counter_data), 0);
+    // Zero out counter data
+    const counter = ctx.accounts.counter.getMut();
+    counter.count = 0;
 }
 
 // ============================================================================
