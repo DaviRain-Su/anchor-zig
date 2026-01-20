@@ -578,15 +578,19 @@ pub fn ZeroAccountTyped(
             return self.input[base_offset + 3] != 0;
         }
 
+        /// Get typed readonly access to account data (skips 8-byte discriminator)
         pub inline fn get(self: Self) if (DataType != void) *const DataType else noreturn {
             if (DataType == void) @compileError("No typed data");
-            return @ptrCast(@alignCast(self.input + DATA_OFFSET));
+            // Skip 8-byte discriminator
+            return @ptrCast(@alignCast(self.input + DATA_OFFSET + 8));
         }
 
+        /// Get typed mutable access to account data (skips 8-byte discriminator)
         pub inline fn getMut(self: Self) if (DataType != void) *DataType else noreturn {
             if (DataType == void) @compileError("No typed data");
             const ptr: [*]u8 = @ptrFromInt(@intFromPtr(self.input));
-            return @ptrCast(@alignCast(ptr + DATA_OFFSET));
+            // Skip 8-byte discriminator
+            return @ptrCast(@alignCast(ptr + DATA_OFFSET + 8));
         }
 
         pub inline fn data(self: Self, comptime len: usize) *const [len]u8 {
@@ -678,14 +682,10 @@ pub fn ZeroAccountTyped(
 
 /// Check if an Accounts struct needs CPI (has program accounts with unknown data size)
 fn needsDynamicParsing(comptime Accounts: type) bool {
-    const fields = std.meta.fields(Accounts);
-    for (fields) |field| {
-        // Check if field name contains "program" (e.g., system_program, token_program)
-        if (std.mem.indexOf(u8, field.name, "program") != null) {
-            return true;
-        }
-    }
-    return false;
+    // Always use dynamic parsing for now - static offset calculation
+    // doesn't work correctly with real account data sizes
+    _ = Accounts;
+    return true;
 }
 
 /// Context type for program() handlers

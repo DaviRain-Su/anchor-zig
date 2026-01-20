@@ -5,7 +5,7 @@ import * as anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 
 const PROGRAM_ID = new anchor.web3.PublicKey(
-  "9YVfTx1E16vs7pzSSfC8wuqz19a4uGC1jtJP3tbKEHYC",
+  "2smXrB4qF2bosysFwE2rQPTLtMLxfat9wuhTSn3JSTf5",
 );
 
 const IDL_PATH = path.resolve(
@@ -17,6 +17,7 @@ const IDL_PATH = path.resolve(
 const COUNTER_SIZE = 16;
 
 async function main(): Promise<void> {
+  // Use localhost
   const url = "http://127.0.0.1:8899";
   const connection = new anchor.web3.Connection(url, "confirmed");
   
@@ -69,6 +70,8 @@ async function main(): Promise<void> {
   if (!initData) {
     throw new Error("Failed to encode initialize");
   }
+  console.log("   Instruction data:", Buffer.from(initData).toString('hex'));
+  console.log("   Discriminator:", Array.from(initData.slice(0, 8)));
   
   const initIx = new anchor.web3.TransactionInstruction({
     programId: PROGRAM_ID,
