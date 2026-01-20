@@ -149,6 +149,7 @@ async function main() {
     { name: "zero-cu-single", path: "zero-cu-single/zig-out/lib/zero_cu_single.so", disc: "check" },
     { name: "zero-cu-multi", path: "zero-cu-multi/zig-out/lib/zero_cu_multi.so", disc: "check" },
     { name: "zero-cu-validated", path: "zero-cu-validated/zig-out/lib/zero_cu_validated.so", disc: "check" },
+    { name: "program-single", path: "zero-cu-program-single/zig-out/lib/pubkey_program_single.so", disc: "check" },
     { name: "zero-cu-program", path: "zero-cu-program/zig-out/lib/zero_cu_program.so", disc: "check" },
     { name: "program-validated", path: "zero-cu-program-validated/zig-out/lib/zero_cu_program_validated.so", disc: "check" },
   ];

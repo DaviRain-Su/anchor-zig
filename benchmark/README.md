@@ -12,8 +12,9 @@ Compares account ownership verification performance.
 | Implementation | CU | Binary Size | Overhead | API |
 |----------------|-----|-------------|----------|-----|
 | zig-raw (baseline) | 5 | 1,240 B | - | Raw Zig |
-| zero-cu-single | 8 | 1,280 B | +3 CU | `entry()` |
 | **zero-cu-validated** | **5** | 1,264 B | **+0 CU** | `entryValidated()` |
+| program-single | 7 | 1,360 B | +2 CU | `program()` single ix |
+| zero-cu-single | 8 | 1,280 B | +3 CU | `entry()` |
 | zero-cu-multi | 10 | 1,392 B | +5 CU | `multi()` |
 | zero-cu-program | 35 | 1,896 B | +30 CU | `program()` multi ix |
 | program-validated | 35 | 1,784 B | +30 CU | `program()` + validated |
@@ -108,9 +109,10 @@ Compares SPL Token CPI operations.
 | API | CU Overhead | Best For |
 |-----|-------------|----------|
 | `entryValidated()` | **+0 CU** | Single instruction + constraints (recommended) |
+| `program()` single | +2 CU | Single instruction with `program()` API |
 | `entry()` | +3 CU | Single instruction, no validation |
 | `multi()` | +5 CU | Multiple instructions, same account layout |
-| `program()` | +30 CU | Different account layouts (most flexible) |
+| `program()` multi | +30 CU | Different account layouts (most flexible) |
 
 ---
 
@@ -150,8 +152,8 @@ benchmark/
 │   ├── zero-cu-single/            # entry() (8 CU)
 │   ├── zero-cu-multi/             # multi() (10 CU)
 │   ├── zero-cu-validated/         # entryValidated() (5 CU) ✓
+│   ├── zero-cu-program-single/    # program() single (7 CU)
 │   ├── zero-cu-program/           # program() (35 CU)
-│   ├── zero-cu-program-single/    # program() single
 │   ├── zero-cu-program-validated/ # program() validated (35 CU)
 │   └── test_cu.ts
 │
