@@ -175,6 +175,15 @@ pub const AccountConstraints = struct {
 /// Discriminator size (8 bytes for Anchor compatibility)
 pub const DISCRIMINATOR_SIZE: usize = 8;
 
+/// Extract type name from full qualified name (e.g., "main.TreeAccount" -> "TreeAccount")
+fn extractTypeName(comptime full_name: []const u8) []const u8 {
+    var last_dot: usize = 0;
+    for (full_name, 0..) |c, i| {
+        if (c == '.') last_dot = i + 1;
+    }
+    return full_name[last_dot..];
+}
+
 /// Resolve data type and size from type or integer
 /// When a type is provided, adds 8 bytes for discriminator automatically
 fn resolveDataType(comptime DataOrLen: anytype) struct { size: usize, Type: type, has_type: bool } {
@@ -1617,25 +1626,31 @@ pub fn program(comptime handlers: anytype) void {
         }
 
         fn dynamicEntrypoint(input: [*]u8, comptime hs: anytype) u64 {
-            // Lazy context loading: only load full context when needed
+            // Read number of accounts first
+            const num_accounts: u64 = @as(*const u64, @ptrCast(@alignCast(input))).*;
+            
             // First, try to find a handler that can use static offsets
+            // Only check handlers with matching account count to avoid buffer overrun
             inline for (hs) |H| {
-                if (comptime !needsDynamicParsing(H.AccountsType)) {
-                    // This handler can use static offsets - check discriminator directly
-                    const CtxType = ZeroInstructionContext(H.AccountsType);
-                    const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
-                    
-                    if (disc_ptr.* == H.discriminator) {
-                        const ctx = CtxType.load(input);
+                const expected_accounts = std.meta.fields(H.AccountsType).len;
+                if (num_accounts == expected_accounts) {
+                    if (comptime !needsDynamicParsing(H.AccountsType)) {
+                        // This handler can use static offsets - check discriminator directly
+                        const CtxType = ZeroInstructionContext(H.AccountsType);
+                        const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
+                        
+                        if (disc_ptr.* == H.discriminator) {
+                            const ctx = CtxType.load(input);
 
-                        if (H.auto_validate) {
-                            ctx.validate() catch return 1;
-                        }
+                            if (H.auto_validate) {
+                                ctx.validate() catch return 1;
+                            }
 
-                        if (H.handlerFn(ctx)) |_| {
-                            return 0;
-                        } else |_| {
-                            return 1;
+                            if (H.handlerFn(ctx)) |_| {
+                                return 0;
+                            } else |_| {
+                                return 1;
+                            }
                         }
                     }
                 }
@@ -2028,11 +2043,33 @@ pub fn ProgramContext(comptime Accounts: type) type {
                                 .owner = self.context.program_id.*,
                             }) catch return error.InitFailed;
 
-                            // Write discriminator if defined
-                            if (C.discriminator) |disc| {
-                                const data = account.dataSlice();
+                            // Write discriminator
+                            // Use explicit discriminator if provided, otherwise compute from DataType name
+                            const disc: [8]u8 = C.discriminator orelse comptime blk: {
+                                if (@hasDecl(field.type, "DataType")) {
+                                    const DT = field.type.DataType;
+                                    if (DT != void) {
+                                        // Get type name and compute discriminator
+                                        const type_name = @typeName(DT);
+                                        // Extract just the type name (after last '.')
+                                        const short_name = extractTypeName(type_name);
+                                        break :blk discriminator_mod.accountDiscriminator(short_name);
+                                    }
+                                }
+                                break :blk [_]u8{0} ** 8; // No discriminator
+                            };
+                            
+                            // Only write if non-zero discriminator
+                            const has_disc = comptime blk: {
+                                for (disc) |b| {
+                                    if (b != 0) break :blk true;
+                                }
+                                break :blk false;
+                            };
+                            if (has_disc) {
+                                const data = account.data();
                                 if (data.len >= 8) {
-                                    const disc_ptr: *[8]u8 = @ptrCast(@constCast(data.ptr));
+                                    const disc_ptr: *[8]u8 = @ptrCast(data.ptr);
                                     disc_ptr.* = disc;
                                 }
                             }
