@@ -12,12 +12,11 @@ Compares account ownership verification performance.
 | Implementation | CU | Binary Size | Overhead | API |
 |----------------|-----|-------------|----------|-----|
 | zig-raw (baseline) | 5 | 1,240 B | - | Raw Zig |
-| **zero-cu-single** | **5** | 1,280 B | **+0 CU** | `entry()` |
-| zero-cu-validated | 5 | 1,264 B | +0 CU | `entryValidated()` |
-| **zero-cu-multi** | **7** | 1,392 B | **+2 CU** | `multi()` |
-| zero-cu-program-single | 19 | 1,360 B | +14 CU | `program()` single ix |
-| zero-cu-program-validated | 18 | 1,584 B | +13 CU | `program()` + validated |
-| zero-cu-program | 19 | 2,024 B | +14 CU | `program()` multi ix |
+| zero-cu-single | 8 | 1,280 B | +3 CU | `entry()` |
+| **zero-cu-validated** | **5** | 1,264 B | **+0 CU** | `entryValidated()` |
+| zero-cu-multi | 10 | 1,392 B | +5 CU | `multi()` |
+| zero-cu-program | 35 | 1,896 B | +30 CU | `program()` multi ix |
+| program-validated | 35 | 1,784 B | +30 CU | `program()` + validated |
 
 **Reference (solana-program-rosetta):**
 | Implementation | CU |
@@ -25,7 +24,7 @@ Compares account ownership verification performance.
 | Rust | 14 |
 | Zig | 15 |
 
-**anchor-zig `entry()` is 3x faster than rosetta!**
+**anchor-zig `entryValidated()` achieves ZERO overhead - matches raw Zig!**
 
 ---
 
@@ -50,17 +49,17 @@ Compares lamport transfer between accounts.
 
 | Implementation | CU | Binary Size | Description |
 |----------------|-----|-------------|-------------|
-| zig-raw (baseline) | 37 | 1,456 B | Raw pointer manipulation |
-| **zero-cu** | **37** | 1,248 B | **`entry()` - ZERO overhead!** |
-| zero-cu-program | 55 | 1,472 B | `program()` API |
+| zig-raw (baseline) | 38 | 1,456 B | Raw pointer manipulation |
+| zero-cu | 50 | 1,592 B | `entry()` API (+12 CU) |
 
 **Reference (solana-program-rosetta):**
 | Implementation | CU |
 |----------------|-----|
-| Rust | 102 |
-| Zig | 39 |
+| Rust | 459 |
+| Zig | 37 |
+| Pinocchio | 28 |
 
-**anchor-zig matches raw Zig performance!**
+**anchor-zig is still 9x faster than Rust!**
 
 ---
 
@@ -107,10 +106,10 @@ Compares SPL Token CPI operations.
 
 | API | CU Overhead | Best For |
 |-----|-------------|----------|
-| `entry()` | +0 CU | Single instruction, max performance |
-| `entryValidated()` | +0 CU | Single instruction + constraints |
-| `multi()` | +2 CU | Multiple instructions, same account layout |
-| `program()` | +14-18 CU | Different account layouts (most flexible) |
+| `entryValidated()` | **+0 CU** | Single instruction + constraints (recommended) |
+| `entry()` | +3 CU | Single instruction, no validation |
+| `multi()` | +5 CU | Multiple instructions, same account layout |
+| `program()` | +30 CU | Different account layouts (most flexible) |
 
 ---
 
@@ -118,8 +117,8 @@ Compares SPL Token CPI operations.
 
 | Operation | anchor-zig | Rust Anchor | Improvement |
 |-----------|------------|-------------|-------------|
-| Account check | 5 CU | ~150 CU | **30x faster** |
-| Transfer lamports | 37 CU | ~150 CU | **4x faster** |
+| Account check | 5-8 CU | ~150 CU | **19-30x faster** |
+| Transfer lamports | 50 CU | ~459 CU | **9x faster** |
 | Binary size | 1-7 KB | 100+ KB | **15-100x smaller** |
 
 ---
@@ -147,12 +146,12 @@ npx tsx test_cu.ts
 benchmark/
 ├── pubkey/                         # Account ownership check
 │   ├── zig-raw/                   # Baseline (5 CU)
-│   ├── zero-cu-single/            # entry() (5 CU)
-│   ├── zero-cu-multi/             # multi() (7 CU)
-│   ├── zero-cu-validated/         # entryValidated() (5 CU)
-│   ├── zero-cu-program/           # program() (19 CU)
-│   ├── zero-cu-program-single/    # program() single (19 CU)
-│   ├── zero-cu-program-validated/ # program() validated (18 CU)
+│   ├── zero-cu-single/            # entry() (8 CU)
+│   ├── zero-cu-multi/             # multi() (10 CU)
+│   ├── zero-cu-validated/         # entryValidated() (5 CU) ✓
+│   ├── zero-cu-program/           # program() (35 CU)
+│   ├── zero-cu-program-single/    # program() single
+│   ├── zero-cu-program-validated/ # program() validated (35 CU)
 │   └── test_cu.ts
 │
 ├── helloworld/                    # Logging benchmark
@@ -163,9 +162,9 @@ benchmark/
 │   └── test_cu.ts
 │
 ├── transfer-lamports/             # Lamport transfer
-│   ├── zig-raw/                   # (37 CU)
-│   ├── zero-cu/                   # (37 CU)
-│   ├── zero-cu-program/           # (55 CU)
+│   ├── zig-raw/                   # (38 CU)
+│   ├── zero-cu/                   # (50 CU)
+│   ├── zero-cu-program/
 │   └── test_cu.ts
 │
 ├── cpi/                           # CPI benchmark
