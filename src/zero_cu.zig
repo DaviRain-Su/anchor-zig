@@ -172,11 +172,22 @@ pub const AccountConstraints = struct {
 // ============================================================================
 
 /// Resolve data type or length to size info
+/// Discriminator size (8 bytes for Anchor compatibility)
+pub const DISCRIMINATOR_SIZE: usize = 8;
+
+/// Resolve data type and size from type or integer
+/// When a type is provided, adds 8 bytes for discriminator automatically
 fn resolveDataType(comptime DataOrLen: anytype) struct { size: usize, Type: type, has_type: bool } {
     const T = @TypeOf(DataOrLen);
     if (T == type) {
-        return .{ .size = @sizeOf(DataOrLen), .Type = DataOrLen, .has_type = true };
+        // Type provided: add 8-byte discriminator to total size
+        return .{ 
+            .size = DISCRIMINATOR_SIZE + @sizeOf(DataOrLen), 
+            .Type = DataOrLen, 
+            .has_type = true,
+        };
     } else if (T == comptime_int) {
+        // Raw size provided: use as-is (user handles discriminator)
         return .{ .size = DataOrLen, .Type = void, .has_type = false };
     } else {
         @compileError("Expected type or comptime_int for account data");
@@ -1690,6 +1701,13 @@ pub fn ProgramContext(comptime Accounts: type) type {
                         if (!has_typed_data) @compileError("No typed data for this account");
                         const raw = ref.ctx.context.accounts[i].data();
                         return @ptrCast(@alignCast(raw.ptr + DATA_OFFSET));
+                    }
+
+                    /// Write discriminator to account data
+                    pub fn writeDiscriminator(ref: @This(), comptime name: []const u8) void {
+                        const disc = discriminator_mod.accountDiscriminator(name);
+                        const raw = ref.ctx.context.accounts[i].data();
+                        @memcpy(raw[0..8], &disc);
                     }
 
                     pub fn isSigner(ref: @This()) bool {

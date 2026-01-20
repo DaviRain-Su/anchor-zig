@@ -34,26 +34,24 @@ pub const PROGRAM_ID = sol.PublicKey.comptimeFromBase58("9YVfTx1E16vs7pzSSfC8wuq
 // Account Data Structures
 // ============================================================================
 
-/// Counter account data (8 bytes data, total 16 bytes with discriminator)
+/// Counter account data (8 bytes)
+/// Total account size with discriminator: 8 (disc) + 8 (count) = 16 bytes
 pub const CounterData = extern struct {
     /// Current count value
     count: u64,
 };
 
-// Total account size: 8 (discriminator) + 8 (count) = 16 bytes
-const COUNTER_ACCOUNT_SIZE = 8 + @sizeOf(CounterData);
-
 // ============================================================================
-// Instruction Accounts (using size for offset calculation)
+// Instruction Accounts (using typed data - discriminator added automatically)
 // ============================================================================
 
 /// Accounts for initialize instruction
 pub const InitializeAccounts = struct {
     /// Payer for account creation (must be signer, writable)
     payer: zero.Signer(0),
-    /// Counter account to initialize (writable, 16 bytes total)
-    counter: zero.Mut(COUNTER_ACCOUNT_SIZE),
-    /// System program for account creation (renamed to avoid dynamic parsing)
+    /// Counter account to initialize (typed: auto +8 for discriminator)
+    counter: zero.Mut(CounterData),
+    /// System program for account creation
     sys_account: zero.Readonly(0),
 };
 
@@ -61,16 +59,16 @@ pub const InitializeAccounts = struct {
 pub const IncrementAccounts = struct {
     /// Authority who can increment (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to modify (writable, 16 bytes total)
-    counter: zero.Mut(COUNTER_ACCOUNT_SIZE),
+    /// Counter account to modify (typed: auto +8 for discriminator)
+    counter: zero.Mut(CounterData),
 };
 
 /// Accounts for close instruction
 pub const CloseAccounts = struct {
     /// Authority who can close (must be signer)
     authority: zero.Signer(0),
-    /// Counter account to close (16 bytes total)
-    counter: zero.Mut(COUNTER_ACCOUNT_SIZE),
+    /// Counter account to close (typed: auto +8 for discriminator)
+    counter: zero.Mut(CounterData),
     /// Destination for remaining lamports
     destination: zero.Mut(0),
 };
@@ -146,14 +144,12 @@ fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
     const args = ctx.args(InitializeArgs);
     const accs = ctx.accounts();
     
-    // Write discriminator (first 8 bytes)
-    const disc = anchor.discriminator.accountDiscriminator("Counter");
-    const data = accs.counter.data();
-    @memcpy(data[0..8], &disc);
+    // Write discriminator using helper
+    accs.counter.writeDiscriminator("Counter");
     
-    // Write count (next 8 bytes, skip discriminator)
-    const count_ptr: *align(1) u64 = @ptrCast(data[8..16]);
-    count_ptr.* = args.initial;
+    // Get typed mutable access (auto-skips discriminator)
+    const counter = accs.counter.getMut();
+    counter.count = args.initial;
 }
 
 /// Increment the counter
@@ -161,17 +157,16 @@ fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
     const args = ctx.args(IncrementArgs);
     const accs = ctx.accounts();
     
-    // Get counter data (skip 8-byte discriminator)
-    const data = accs.counter.data();
-    const count_ptr: *align(1) u64 = @ptrCast(data[8..16]);
+    // Get typed mutable access (auto-skips discriminator)
+    const counter = accs.counter.getMut();
     
     // Check for overflow
-    const new_count = @addWithOverflow(count_ptr.*, args.amount);
+    const new_count = @addWithOverflow(counter.count, args.amount);
     if (new_count[1] != 0) {
         return error.CounterOverflow;
     }
 
-    count_ptr.* = new_count[0];
+    counter.count = new_count[0];
 }
 
 /// Close the counter account
@@ -186,8 +181,8 @@ fn close(ctx: zero.Ctx(CloseAccounts)) !void {
     counter_lamports.* = 0;
     
     // Zero out counter data
-    const data = accs.counter.data();
-    @memset(data, 0);
+    const counter = accs.counter.getMut();
+    counter.count = 0;
 }
 
 // ============================================================================
