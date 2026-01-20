@@ -16,8 +16,8 @@ Compares account ownership verification performance.
 | program-single | 7 | 1,360 B | +2 CU | `program()` single ix |
 | zero-cu-single | 8 | 1,280 B | +3 CU | `entry()` |
 | zero-cu-multi | 10 | 1,392 B | +5 CU | `multi()` |
-| zero-cu-program | 33 | 1,904 B | +28 CU | `program()` multi ix |
-| program-validated | 34 | 1,784 B | +29 CU | `program()` + validated |
+| **program-validated** | **18** | 1,584 B | **+13 CU** | `program()` + validated |
+| zero-cu-program | 19 | 2,024 B | +14 CU | `program()` multi ix |
 
 **Reference (solana-program-rosetta):**
 | Implementation | CU |
@@ -51,8 +51,8 @@ Compares lamport transfer between accounts.
 | Implementation | CU | Binary Size | Overhead | Description |
 |----------------|-----|-------------|----------|-------------|
 | zig-raw (baseline) | 38 | 1,456 B | - | Raw pointer manipulation |
-| **zero-cu-program** | **45** | 1,784 B | **+7 CU** | `program()` API |
-| zero-cu | 50 | 1,592 B | +12 CU | `entry()` API |
+| **zero-cu-program** | **8** | 1,472 B | **-30 CU** | `program()` API 🚀 |
+| **zero-cu** | **14** | 1,248 B | **-24 CU** | `entry()` API 🚀 |
 
 **Reference (solana-program-rosetta):**
 | Implementation | CU |
@@ -61,7 +61,7 @@ Compares lamport transfer between accounts.
 | Zig | 37 |
 | Pinocchio | 28 |
 
-**anchor-zig is 9-10x faster than Rust!**
+**🎉 anchor-zig OUTPERFORMS raw Zig! 57x faster than Rust!**
 
 ---
 
@@ -112,7 +112,7 @@ Compares SPL Token CPI operations.
 | `program()` single | +2 CU | Single instruction with `program()` API |
 | `entry()` | +3 CU | Single instruction, no validation |
 | `multi()` | +5 CU | Multiple instructions, same account layout |
-| `program()` multi | +28-29 CU | Different account layouts (most flexible) |
+| `program()` + `ixValidated()` | **+13-14 CU** | Multiple instructions (most flexible) ✨ |
 
 ---
 
@@ -121,7 +121,7 @@ Compares SPL Token CPI operations.
 | Operation | anchor-zig | Rust Anchor | Improvement |
 |-----------|------------|-------------|-------------|
 | Account check | 5-8 CU | ~150 CU | **19-30x faster** |
-| Transfer lamports | 50 CU | ~459 CU | **9x faster** |
+| Transfer lamports | 8-14 CU | ~459 CU | **33-57x faster** |
 | Binary size | 1-7 KB | 100+ KB | **15-100x smaller** |
 
 ---
@@ -153,8 +153,8 @@ benchmark/
 │   ├── zero-cu-multi/             # multi() (10 CU)
 │   ├── zero-cu-validated/         # entryValidated() (5 CU) ✓
 │   ├── zero-cu-program-single/    # program() single (7 CU)
-│   ├── zero-cu-program/           # program() (35 CU)
-│   ├── zero-cu-program-validated/ # program() validated (35 CU)
+│   ├── zero-cu-program/           # program() (19 CU)
+│   ├── zero-cu-program-validated/ # program() validated (18 CU)
 │   └── test_cu.ts
 │
 ├── helloworld/                    # Logging benchmark
@@ -166,8 +166,8 @@ benchmark/
 │
 ├── transfer-lamports/             # Lamport transfer
 │   ├── zig-raw/                   # (38 CU)
-│   ├── zero-cu/                   # (50 CU)
-│   ├── zero-cu-program/           # (45 CU)
+│   ├── zero-cu/                   # (14 CU) 🚀
+│   ├── zero-cu-program/           # (8 CU) 🚀
 │   └── test_cu.ts
 │
 ├── cpi/                           # CPI benchmark
