@@ -1594,20 +1594,16 @@ pub fn program(comptime handlers: anytype) void {
         }
 
         fn dynamicEntrypoint(input: [*]u8, comptime hs: anytype) u64 {
-            const context = sol.context.Context.load(input) catch return 1;
-
-            if (context.data.len < 8) return 1;
-
-            const disc: *align(1) const u64 = @ptrCast(context.data.ptr);
-
+            // Lazy context loading: only load full context when needed
+            // First, try to find a handler that can use static offsets
             inline for (hs) |H| {
-                if (disc.* == H.discriminator) {
-                    // Use the same context type that Ctx() would return for this handler
-                    const CtxType = Ctx(H.AccountsType);
+                if (comptime !needsDynamicParsing(H.AccountsType)) {
+                    // This handler can use static offsets - check discriminator directly
+                    const CtxType = ZeroInstructionContext(H.AccountsType);
+                    const disc_ptr: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
                     
-                    if (comptime needsDynamicParsing(H.AccountsType)) {
-                        // This handler needs dynamic parsing
-                        const ctx = CtxType.init(context);
+                    if (disc_ptr.* == H.discriminator) {
+                        const ctx = CtxType.load(input);
 
                         if (H.auto_validate) {
                             ctx.validate() catch return 1;
@@ -1618,9 +1614,21 @@ pub fn program(comptime handlers: anytype) void {
                         } else |_| {
                             return 1;
                         }
-                    } else {
-                        // This handler can use static offsets
-                        const ctx = CtxType.load(input);
+                    }
+                }
+            }
+            
+            // No static handler matched, load full context for dynamic handlers
+            const context = sol.context.Context.load(input) catch return 1;
+
+            if (context.data.len < 8) return 1;
+
+            const disc: *align(1) const u64 = @ptrCast(context.data.ptr);
+
+            inline for (hs) |H| {
+                if (comptime needsDynamicParsing(H.AccountsType)) {
+                    if (disc.* == H.discriminator) {
+                        const ctx = ProgramContext(H.AccountsType).init(context);
 
                         if (H.auto_validate) {
                             ctx.validate() catch return 1;
