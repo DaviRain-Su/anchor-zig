@@ -1,17 +1,13 @@
 const std = @import("std");
-const solana = @import("solana_program_sdk");
 
 pub fn build(b: *std.Build) void {
     // Accept target and optimize options from dependents
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Use provided target or default to SBF for Solana programs
-    const sbf_target = b.resolveTargetQuery(solana.sbf_target);
-    const effective_target = if (target.result.cpu.arch == .x86_64 or target.result.cpu.arch == .aarch64)
-        target
-    else
-        sbf_target;
+    // For testing and IDL generation, we use host target
+    // For actual program builds, users provide SBF target via their build.zig
+    const effective_target = target;
 
     // Get dependencies for effective target
     const solana_dep = b.dependency("solana_program_sdk", .{
