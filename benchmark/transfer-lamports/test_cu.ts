@@ -134,6 +134,11 @@ async function main() {
       soPath: "zero-cu/zig-out/lib/transfer_zero_cu.so",
       useDisc: true,
     },
+    {
+      name: "zero-cu-program",
+      soPath: "zero-cu-program/zig-out/lib/transfer_program.so",
+      useDisc: true,
+    },
   ];
 
   console.log("📦 Deploying and testing programs...\n");
@@ -175,7 +180,10 @@ async function main() {
     
     console.log("\n📊 Summary:");
     console.log(`   • Raw Zig baseline: ${results[0].cu} CU`);
-    console.log(`   • zero-cu: ${results[1].cu} CU (+${results[1].cu - results[0].cu} CU overhead)`);
+    for (let i = 1; i < results.length; i++) {
+      const r = results[i];
+      console.log(`   • ${r.name}: ${r.cu} CU (+${r.cu - baseline} CU overhead)`);
+    }
     
     console.log("\n📚 Reference (solana-program-rosetta transfer-lamports):");
     console.log("   • Rust:     459 CU");

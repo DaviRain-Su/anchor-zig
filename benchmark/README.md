@@ -47,10 +47,11 @@ Compares program logging overhead.
 
 Compares lamport transfer between accounts.
 
-| Implementation | CU | Binary Size | Description |
-|----------------|-----|-------------|-------------|
-| zig-raw (baseline) | 38 | 1,456 B | Raw pointer manipulation |
-| zero-cu | 50 | 1,592 B | `entry()` API (+12 CU) |
+| Implementation | CU | Binary Size | Overhead | Description |
+|----------------|-----|-------------|----------|-------------|
+| zig-raw (baseline) | 38 | 1,456 B | - | Raw pointer manipulation |
+| **zero-cu-program** | **45** | 1,784 B | **+7 CU** | `program()` API |
+| zero-cu | 50 | 1,592 B | +12 CU | `entry()` API |
 
 **Reference (solana-program-rosetta):**
 | Implementation | CU |
@@ -59,7 +60,7 @@ Compares lamport transfer between accounts.
 | Zig | 37 |
 | Pinocchio | 28 |
 
-**anchor-zig is still 9x faster than Rust!**
+**anchor-zig is 9-10x faster than Rust!**
 
 ---
 
@@ -164,7 +165,7 @@ benchmark/
 ├── transfer-lamports/             # Lamport transfer
 │   ├── zig-raw/                   # (38 CU)
 │   ├── zero-cu/                   # (50 CU)
-│   ├── zero-cu-program/
+│   ├── zero-cu-program/           # (45 CU)
 │   └── test_cu.ts
 │
 ├── cpi/                           # CPI benchmark
