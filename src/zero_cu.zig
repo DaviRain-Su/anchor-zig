@@ -711,6 +711,12 @@ pub fn ZeroAccountTyped(
 fn needsDynamicParsing(comptime Accounts: type) bool {
     const fields = std.meta.fields(Accounts);
     for (fields) |field| {
+        // Check if account needs init - requires CPI to create
+        if (@hasDecl(field.type, "CONSTRAINTS")) {
+            if (field.type.CONSTRAINTS.init) {
+                return true; // Init accounts need dynamic context for CPI
+            }
+        }
         // Check if account has fixed/known size
         if (@hasDecl(field.type, "is_fixed_size")) {
             if (field.type.is_fixed_size) {
@@ -874,11 +880,13 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
                     if (!acc.id().equals(expected_addr)) return error.ConstraintAddress;
                 }
 
-                // Discriminator check
+                // Discriminator check (skip for init accounts - they're created later)
                 if (C.discriminator) |expected_disc| {
-                    const actual: *const [8]u8 = @ptrCast(acc.data(8));
-                    if (!std.mem.eql(u8, actual, &expected_disc)) {
-                        return error.AccountDiscriminatorMismatch;
+                    if (!C.init) {
+                        const actual: *const [8]u8 = @ptrCast(acc.data(8));
+                        if (!std.mem.eql(u8, actual, &expected_disc)) {
+                            return error.AccountDiscriminatorMismatch;
+                        }
                     }
                 }
 
@@ -1645,6 +1653,9 @@ pub fn program(comptime handlers: anytype) void {
                     if (disc.* == H.discriminator) {
                         const ctx = ProgramContext(H.AccountsType).init(context);
 
+                        // Process init constraints first (creates accounts)
+                        ctx.processInit() catch return 1;
+
                         if (H.auto_validate) {
                             ctx.validate() catch return 1;
                         }
@@ -1872,13 +1883,15 @@ pub fn ProgramContext(comptime Accounts: type) type {
                         if (!account.id().equals(expected_addr)) return error.ConstraintAddress;
                     }
 
-                    // Discriminator check
+                    // Discriminator check (skip for init accounts - they're created later)
                     if (C.discriminator) |expected_disc| {
-                        const data = account.dataSlice();
-                        if (data.len < 8) return error.AccountDataTooSmall;
-                        const actual: *const [8]u8 = @ptrCast(data.ptr);
-                        if (!std.mem.eql(u8, actual, &expected_disc)) {
-                            return error.AccountDiscriminatorMismatch;
+                        if (!C.init) {
+                            const data = account.dataSlice();
+                            if (data.len < 8) return error.AccountDataTooSmall;
+                            const actual: *const [8]u8 = @ptrCast(data.ptr);
+                            if (!std.mem.eql(u8, actual, &expected_disc)) {
+                                return error.AccountDiscriminatorMismatch;
+                            }
                         }
                     }
 
@@ -1978,53 +1991,50 @@ pub fn ProgramContext(comptime Accounts: type) type {
                     if (C.init) {
                         const account = self.context.accounts[i];
 
-                        // Get payer account
-                        const payer_name = C.payer orelse @compileError("init requires payer");
-                        const payer_idx = comptime blk: {
-                            for (fields, 0..) |f, idx| {
-                                if (std.mem.eql(u8, f.name, payer_name)) break :blk idx;
-                            }
-                            @compileError("payer account not found: " ++ payer_name);
-                        };
-                        const payer = self.context.accounts[payer_idx];
+                        // Check if account already initialized (has lamports)
+                        // Only create if account doesn't exist yet
+                        if (account.lamports().* == 0) {
+                            // Get payer account
+                            const payer_name = C.payer orelse @compileError("init requires payer");
+                            const payer_idx = comptime blk: {
+                                for (fields, 0..) |f, idx| {
+                                    if (std.mem.eql(u8, f.name, payer_name)) break :blk idx;
+                                }
+                                @compileError("payer account not found: " ++ payer_name);
+                            };
+                            const payer = self.context.accounts[payer_idx];
 
-                        // Calculate space
-                        const space: u64 = C.space orelse blk: {
-                            if (@hasDecl(field.type, "data_size")) {
-                                break :blk field.type.data_size + 8;
-                            } else {
-                                @compileError("init requires space or typed account");
-                            }
-                        };
+                            // Calculate space
+                            const space: u64 = C.space orelse blk: {
+                                if (@hasDecl(field.type, "data_size")) {
+                                    break :blk field.type.data_size + 8;
+                                } else {
+                                    @compileError("init requires space or typed account");
+                                }
+                            };
 
-                        // Check if account already initialized
-                        if (account.lamports().* > 0) continue;
+                            // Create account via CPI
+                            const payer_info = payer.info();
+                            const account_info = account.info();
+                            
+                            const rent = sol.rent.Rent.getOrDefault();
+                            const lamports = rent.getMinimumBalance(space);
+                            
+                            sol.system_program.createAccountCpi(.{
+                                .from = payer_info,
+                                .to = account_info,
+                                .lamports = lamports,
+                                .space = space,
+                                .owner = self.context.program_id.*,
+                            }) catch return error.InitFailed;
 
-                        // Create account via CPI
-                        const payer_info = payer.info();
-                        const account_info = account.info();
-                        
-                        const lamports = sol.rent.Rent.DEFAULT.minimumBalance(space);
-                        
-                        const create_ix = sol.system_instruction.createAccount(
-                            payer_info.id.*,
-                            account_info.id.*,
-                            lamports,
-                            space,
-                            self.context.program_id.*,
-                        );
-                        
-                        if (create_ix.invokeSigned(&.{ payer_info, account_info }, &.{})) |err| {
-                            _ = err;
-                            return error.InitFailed;
-                        }
-
-                        // Write discriminator if defined
-                        if (C.discriminator) |disc| {
-                            const data = account.dataSlice();
-                            if (data.len >= 8) {
-                                const disc_ptr: *[8]u8 = @ptrCast(@constCast(data.ptr));
-                                disc_ptr.* = disc;
+                            // Write discriminator if defined
+                            if (C.discriminator) |disc| {
+                                const data = account.dataSlice();
+                                if (data.len >= 8) {
+                                    const disc_ptr: *[8]u8 = @ptrCast(@constCast(data.ptr));
+                                    disc_ptr.* = disc;
+                                }
                             }
                         }
                     }
