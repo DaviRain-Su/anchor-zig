@@ -8,21 +8,21 @@ High-performance Anchor-like framework for Solana program development in Zig.
 
 | Benchmark | zig-raw | anchor-zig | Rust Anchor | Improvement |
 |-----------|---------|------------|-------------|-------------|
-| Account check | 5 CU | **5 CU** | ~150 CU | **30x faster** |
-| Transfer lamports | 37 CU | **37 CU** | ~150 CU | **4x faster** |
-| PDA verification | 19 CU | **19 CU** | ~200 CU | **10x faster** |
+| Account check | 5 CU | **5-18 CU** | ~150 CU | **8-30x faster** |
+| Transfer lamports | 38 CU | **8-14 CU** 🚀 | ~459 CU | **33-57x faster** |
+| Multi-instruction | N/A | **18 CU** | ~150 CU | **8x faster** |
 
 ### API Comparison
 
 | API | CU Overhead | Binary Size | Use Case |
 |-----|-------------|-------------|----------|
-| `entry()` | **+0 CU** | ~1.3 KB | Single instruction, max performance |
 | `entryValidated()` | **+0 CU** | ~1.3 KB | Single instruction + auto constraints |
-| `multi()` | **+2 CU** | ~1.4 KB | Multiple instructions, same accounts |
-| `program()` | **+14-18 CU** | ~1.6-2 KB | Different account layouts (recommended) |
+| `entry()` | +3 CU | ~1.3 KB | Single instruction, no validation |
+| `multi()` | +5 CU | ~1.4 KB | Multiple instructions, same accounts |
+| `program()` + `ixValidated()` | **+13-14 CU** | ~1.6-2 KB | Different account layouts ✨ **Recommended** |
 | Rust Anchor | ~150 CU | 100+ KB | - |
 
-**anchor-zig achieves zero overhead with `entry()` and minimal overhead with `program()`!**
+**anchor-zig achieves zero overhead with `entryValidated()` and 8x faster than Rust with `program()`!**
 
 ### Binary Size Comparison
 

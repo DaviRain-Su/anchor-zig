@@ -4,19 +4,32 @@
 
 | Feature | zero_cu | Standard Anchor | Notes |
 |---------|---------|-----------------|-------|
-| **CU Overhead** | **5-7 CU** | ~150 CU | zero_cu is 20-30x faster |
-| **Binary Size** | ~1.3 KB | ~7+ KB | zero_cu is 5x smaller |
+| **CU Overhead** | **5-18 CU** | ~150 CU | zero_cu is 8-30x faster |
+| **Binary Size** | ~1.2-2 KB | ~100+ KB | zero_cu is 50-100x smaller |
 | **Constraints** | ✅ Declarative | ✅ Declarative | Same API style |
 
 ## Benchmark Results
 
+### PubKey (Account Check)
+
 | Implementation | CU | Size | Notes |
 |----------------|-----|------|-------|
-| Raw Zig | 5 | 1240 B | Baseline |
-| zero-cu-single | 5 | 1280 B | **ZERO overhead!** |
-| zero-cu-multi | 7 | 1392 B | +2 CU for dispatch |
-| zero-cu-validated | 5 | 1264 B | **With owner constraint!** |
-| Standard Anchor | ~150 | 7+ KB | Full validation |
+| Raw Zig | 5 | 1,240 B | Baseline |
+| zero-cu-validated | 5 | 1,264 B | **ZERO overhead!** |
+| program-single | 7 | 1,360 B | +2 CU |
+| zero-cu-single | 8 | 1,280 B | +3 CU |
+| zero-cu-multi | 10 | 1,392 B | +5 CU |
+| program-validated | 18 | 1,584 B | +13 CU (multi instruction) |
+| Rust Anchor | ~150 | 100+ KB | Full validation |
+
+### Transfer Lamports
+
+| Implementation | CU | Size | Notes |
+|----------------|-----|------|-------|
+| zero-cu-program | 8 | 1,472 B | 🚀 **Faster than raw!** |
+| zero-cu | 14 | 1,248 B | 🚀 **Faster than raw!** |
+| Raw Zig | 38 | 1,456 B | Baseline |
+| Rust Anchor | ~459 | 100+ KB | 33-57x slower |
 
 ## Account Features
 
@@ -172,9 +185,9 @@ pub fn initialize(ctx: zero.Ctx(Accounts)) !void {
 
 ### Use zero_cu when:
 - ✅ CU optimization is critical (DeFi, high-frequency)
-- ✅ Simple account validation is sufficient
-- ✅ You want smallest binary size
-- ✅ Performance is more important than safety
+- ✅ You want Anchor-style declarative constraints
+- ✅ You want smallest binary size (50-100x smaller than Rust)
+- ✅ Performance matters (8-30x faster than Rust Anchor)
 
 ### Use Standard Anchor when:
 - ✅ You need PDA validation
@@ -196,9 +209,12 @@ pub fn initialize(ctx: zero.Ctx(Accounts)) !void {
 You can use both in the same program:
 
 ```zig
-// Hot path: use zero_cu for 5 CU
+// Recommended: use program() + ixValidated() for multi-instruction (18 CU)
 comptime {
-    zero.entry(TransferAccounts, "transfer", transfer);
+    zero.program(.{
+        zero.ixValidated("transfer", TransferAccounts, transfer),
+        zero.ixValidated("close", CloseAccounts, close),
+    });
 }
 
 // Complex path: use standard Anchor
