@@ -701,6 +701,13 @@ pub fn ZeroAccountTyped(
         pub inline fn loadInit(self: Self) if (DataType != void) *DataType else noreturn {
             return self.getMut();
         }
+
+        /// Write discriminator to account data
+        pub inline fn writeDiscriminator(self: Self, comptime name: []const u8) void {
+            const disc = discriminator_mod.accountDiscriminator(name);
+            const data_ptr = self.dataMut(8);
+            @memcpy(data_ptr, &disc);
+        }
     };
 }
 
