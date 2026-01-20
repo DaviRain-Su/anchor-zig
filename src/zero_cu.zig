@@ -773,7 +773,8 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
 
     return struct {
         input: [*]const u8,
-        accounts: AccountsAccessor,
+        /// Direct field access for zero-overhead account access
+        _accounts: AccountsAccessor,
 
         const Self = @This();
         pub const ix_data_offset = instructionDataOffset(data_lens);
@@ -784,7 +785,13 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
             inline for (fields) |field| {
                 @field(acc, field.name) = .{ .input = input };
             }
-            return .{ .input = input, .accounts = acc };
+            return .{ .input = input, ._accounts = acc };
+        }
+
+        /// Get accounts accessor (for API consistency with ProgramContext)
+        /// Both ctx.accounts() and ctx._accounts work for zero-overhead access
+        pub inline fn accounts(self: Self) AccountsAccessor {
+            return self._accounts;
         }
 
         /// Load from parsed Context (for manual dispatch scenarios like SPL Token)
@@ -827,8 +834,9 @@ pub fn ZeroInstructionContext(comptime Accounts: type) type {
 
         /// Validate all declared constraints
         pub fn validate(self: Self) !void {
+            const accs = self._accounts;
             inline for (fields) |field| {
-                const acc = @field(self.accounts, field.name);
+                const acc = @field(accs, field.name);
                 const C = @TypeOf(acc).Constraints;
 
                 // Signer check
@@ -1375,21 +1383,40 @@ fn entryWithValidation(
     comptime handler: anytype,
     comptime auto_validate: bool,
 ) void {
-    const CtxType = ZeroInstructionContext(Accounts);
+    const use_dynamic = comptime needsDynamicParsing(Accounts);
     const disc: u64 = @bitCast(discriminator_mod.instructionDiscriminator(inst_name));
 
     const S = struct {
         fn entrypoint(input: [*]u8) callconv(.c) u64 {
-            const actual: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
-            if (actual.* != disc) return 1;
+            if (use_dynamic) {
+                // Dynamic context for accounts with unknown sizes
+                const context = sol.context.Context.load(input) catch return 1;
+                if (context.data.len < 8) return 1;
+                
+                const actual_disc: *align(1) const u64 = @ptrCast(context.data.ptr);
+                if (actual_disc.* != disc) return 1;
+                
+                const ctx = ProgramContext(Accounts).init(context);
+                
+                if (auto_validate) {
+                    @constCast(&ctx).validate() catch return 1;
+                }
+                
+                if (handler(ctx)) |_| return 0 else |_| return 1;
+            } else {
+                // Static context for known account sizes (faster)
+                const CtxType = ZeroInstructionContext(Accounts);
+                const actual: *align(1) const u64 = @ptrCast(input + CtxType.ix_data_offset);
+                if (actual.* != disc) return 1;
 
-            const ctx = CtxType.load(input);
+                const ctx = CtxType.load(input);
 
-            if (auto_validate) {
-                ctx.validate() catch return 1;
+                if (auto_validate) {
+                    ctx.validate() catch return 1;
+                }
+
+                if (handler(ctx)) |_| return 0 else |_| return 1;
             }
-
-            if (handler(ctx)) |_| return 0 else |_| return 1;
         }
     };
 
@@ -1406,12 +1433,19 @@ pub fn entryRaw(
     comptime Accounts: type,
     comptime handler: anytype,
 ) void {
-    const CtxType = ZeroInstructionContext(Accounts);
+    const use_dynamic = comptime needsDynamicParsing(Accounts);
 
     const S = struct {
         fn entrypoint(input: [*]u8) callconv(.c) u64 {
-            const ctx = CtxType.load(input);
-            if (handler(ctx)) |_| return 0 else |_| return 1;
+            if (use_dynamic) {
+                const context = sol.context.Context.load(input) catch return 1;
+                const ctx = ProgramContext(Accounts).init(context);
+                if (handler(ctx)) |_| return 0 else |_| return 1;
+            } else {
+                const CtxType = ZeroInstructionContext(Accounts);
+                const ctx = CtxType.load(input);
+                if (handler(ctx)) |_| return 0 else |_| return 1;
+            }
         }
     };
 
@@ -1568,16 +1602,35 @@ pub fn program(comptime handlers: anytype) void {
 
             inline for (hs) |H| {
                 if (disc.* == H.discriminator) {
-                    var ctx = ProgramContext(H.AccountsType).init(context);
+                    // Use the same context type that Ctx() would return for this handler
+                    const CtxType = Ctx(H.AccountsType);
+                    
+                    if (comptime needsDynamicParsing(H.AccountsType)) {
+                        // This handler needs dynamic parsing
+                        const ctx = CtxType.init(context);
 
-                    if (H.auto_validate) {
-                        ctx.validate() catch return 1;
-                    }
+                        if (H.auto_validate) {
+                            ctx.validate() catch return 1;
+                        }
 
-                    if (H.handlerFn(ctx)) |_| {
-                        return 0;
-                    } else |_| {
-                        return 1;
+                        if (H.handlerFn(ctx)) |_| {
+                            return 0;
+                        } else |_| {
+                            return 1;
+                        }
+                    } else {
+                        // This handler can use static offsets
+                        const ctx = CtxType.load(input);
+
+                        if (H.auto_validate) {
+                            ctx.validate() catch return 1;
+                        }
+
+                        if (H.handlerFn(ctx)) |_| {
+                            return 0;
+                        } else |_| {
+                            return 1;
+                        }
                     }
                 }
             }
@@ -1664,66 +1717,67 @@ pub fn ProgramContext(comptime Accounts: type) type {
                 const has_typed_data = if (@hasDecl(field.type, "has_typed_data")) field.type.has_typed_data else false;
 
                 const RefType = struct {
-                    ctx: *const Self,
+                    // Store the account directly instead of a pointer to ctx
+                    account: sol.account.Account,
 
                     // Typed data size constant for discriminator offset
                     const DATA_OFFSET: usize = 8; // Skip 8-byte discriminator
 
                     pub fn id(ref: @This()) *const PublicKey {
-                        return &ref.ctx.context.accounts[i].ptr.id;
+                        return &ref.account.ptr.id;
                     }
 
                     pub fn lamports(ref: @This()) *u64 {
-                        return ref.ctx.context.accounts[i].lamports();
+                        return ref.account.lamports();
                     }
 
                     pub fn info(ref: @This()) sol.account.Account.Info {
-                        return ref.ctx.context.accounts[i].info();
+                        return ref.account.info();
                     }
 
                     pub fn dataSlice(ref: @This()) []u8 {
-                        return ref.ctx.context.accounts[i].data();
+                        return ref.account.data();
                     }
 
                     pub fn data(ref: @This()) []u8 {
-                        return ref.ctx.context.accounts[i].data();
+                        return ref.account.data();
                     }
 
                     /// Get typed readonly access to account data (skips discriminator)
                     pub fn get(ref: @This()) if (has_typed_data) *const DataType else noreturn {
                         if (!has_typed_data) @compileError("No typed data for this account");
-                        const raw = ref.ctx.context.accounts[i].data();
+                        const raw = ref.account.data();
                         return @ptrCast(@alignCast(raw.ptr + DATA_OFFSET));
                     }
 
                     /// Get typed mutable access to account data (skips discriminator)
                     pub fn getMut(ref: @This()) if (has_typed_data) *DataType else noreturn {
                         if (!has_typed_data) @compileError("No typed data for this account");
-                        const raw = ref.ctx.context.accounts[i].data();
+                        const raw = ref.account.data();
                         return @ptrCast(@alignCast(raw.ptr + DATA_OFFSET));
                     }
 
                     /// Write discriminator to account data
                     pub fn writeDiscriminator(ref: @This(), comptime name: []const u8) void {
                         const disc = discriminator_mod.accountDiscriminator(name);
-                        const raw = ref.ctx.context.accounts[i].data();
+                        const raw = ref.account.data();
                         @memcpy(raw[0..8], &disc);
                     }
 
                     pub fn isSigner(ref: @This()) bool {
-                        return ref.ctx.context.accounts[i].isSigner();
+                        return ref.account.isSigner();
                     }
 
                     pub fn isWritable(ref: @This()) bool {
-                        return ref.ctx.context.accounts[i].isWritable();
+                        return ref.account.isWritable();
                     }
 
                     pub fn ownerId(ref: @This()) *const PublicKey {
-                        return &ref.ctx.context.accounts[i].ptr.owner_id;
+                        return &ref.account.ptr.owner_id;
                     }
 
                     pub fn isExecutable(ref: @This()) bool {
-                        return ref.ctx.context.accounts[i].isExecutable();
+                        return ref.account.isExecutable();
                     }
                 };
                 acc_fields[i] = .{
@@ -1748,24 +1802,24 @@ pub fn ProgramContext(comptime Accounts: type) type {
             return .{ .context = context };
         }
 
-        pub fn accounts(self: *const Self) AccountsAccessor {
+        pub fn accounts(self: Self) AccountsAccessor {
             var acc: AccountsAccessor = undefined;
-            inline for (fields) |field| {
-                @field(acc, field.name) = .{ .ctx = self };
+            inline for (fields, 0..) |field, i| {
+                @field(acc, field.name) = .{ .account = self.context.accounts[i] };
             }
             return acc;
         }
 
-        pub fn args(self: *const Self, comptime T: type) *const T {
+        pub fn args(self: Self, comptime T: type) *const T {
             return @ptrCast(@alignCast(self.context.data.ptr + 8));
         }
 
-        pub fn programId(self: *const Self) *const PublicKey {
+        pub fn programId(self: Self) *const PublicKey {
             return self.context.program_id;
         }
 
         /// Validate all declared constraints on accounts
-        pub fn validate(self: *const Self) !void {
+        pub fn validate(self: Self) !void {
             const accs = self.accounts();
             inline for (fields, 0..) |field, i| {
                 // Get account from context
@@ -2477,7 +2531,8 @@ test "Signer has correct flags" {
 test "Account with constraints" {
     const TestData = struct { value: u64 };
     const A = Account(TestData, .{ .owner = PublicKey.default() });
-    try std.testing.expectEqual(@as(usize, 8), A.data_size);
+    // data_size = 8 (discriminator) + 8 (u64) = 16
+    try std.testing.expectEqual(@as(usize, 16), A.data_size);
     try std.testing.expect(A.CONSTRAINTS.owner != null);
 }
 

@@ -42,7 +42,8 @@ const ValidateAccounts = struct {
 
 /// Check if account id equals owner id
 pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
-    const target = ctx.accounts.target;
+    const accs = ctx.accounts();
+    const target = accs.target;
     if (!target.id().equals(target.ownerId().*)) {
         return error.InvalidKey;
     }
@@ -50,7 +51,8 @@ pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
 
 /// Same as check but with different account type
 pub fn verify(ctx: zero.Ctx(VerifyAccounts)) !void {
-    const target = ctx.accounts.target;
+    const accs = ctx.accounts();
+    const target = accs.target;
     if (!target.id().equals(target.ownerId().*)) {
         return error.InvalidKey;
     }
@@ -58,10 +60,11 @@ pub fn verify(ctx: zero.Ctx(VerifyAccounts)) !void {
 
 /// Validate with authority check
 pub fn validate(ctx: zero.Ctx(ValidateAccounts)) !void {
-    if (!ctx.accounts.authority.isSigner()) {
+    const accs = ctx.accounts();
+    if (!accs.authority.isSigner()) {
         return error.MissingSigner;
     }
-    const target = ctx.accounts.target;
+    const target = accs.target;
     if (!target.id().equals(target.ownerId().*)) {
         return error.InvalidKey;
     }

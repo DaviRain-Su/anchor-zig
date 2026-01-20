@@ -44,18 +44,18 @@ const ValidateAccounts = struct {
 pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
     // ctx.validate() already called by ixValidated
     // Just access the data
-    _ = ctx.accounts.target.get().value;
+    _ = ctx.accounts().target.get().value;
 }
 
 /// Verify with owner validation
 pub fn verify(ctx: zero.Ctx(VerifyAccounts)) !void {
-    _ = ctx.accounts.target.get().value;
+    _ = ctx.accounts().target.get().value;
 }
 
 /// Validate with signer + owner validation
 pub fn validate(ctx: zero.Ctx(ValidateAccounts)) !void {
     // Signer and owner are auto-validated
-    _ = ctx.accounts.target.get().value;
+    _ = ctx.accounts().target.get().value;
 }
 
 // ============================================================================

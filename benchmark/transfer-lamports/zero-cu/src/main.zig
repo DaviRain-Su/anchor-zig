@@ -31,10 +31,11 @@ const TransferArgs = struct {
 
 pub fn transfer(ctx: zero.Ctx(TransferAccounts)) !void {
     const args = ctx.args(TransferArgs);
+    const accs = ctx.accounts();
     
     // Direct lamport transfer (no CPI needed for program-owned accounts)
-    const from_lamports = ctx.accounts.source.lamports();
-    const to_lamports = ctx.accounts.destination.lamports();
+    const from_lamports = accs.source.lamports();
+    const to_lamports = accs.destination.lamports();
     
     if (from_lamports.* < args.amount) {
         return error.InsufficientFunds;

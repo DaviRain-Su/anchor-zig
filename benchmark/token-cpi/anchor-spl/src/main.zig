@@ -23,11 +23,11 @@
 //! pub fn transfer_tokens(ctx: Context<TransferTokens>, amount: u64) -> Result<()> {
 //!     token::transfer(
 //!         CpiContext::new(
-//!             ctx.accounts.token_program.to_account_info(),
+//!             ctx.accounts().token_program.to_account_info(),
 //!             Transfer {
-//!                 from: ctx.accounts.source.to_account_info(),
-//!                 to: ctx.accounts.destination.to_account_info(),
-//!                 authority: ctx.accounts.authority.to_account_info(),
+//!                 from: ctx.accounts().source.to_account_info(),
+//!                 to: ctx.accounts().destination.to_account_info(),
+//!                 authority: ctx.accounts().authority.to_account_info(),
 //!             },
 //!         ),
 //!         amount,
@@ -122,7 +122,7 @@ const AmountArgs = extern struct {
 // ============================================================================
 
 /// Transfer tokens via CPI to SPL Token Program
-fn transfer(ctx: *zero.ProgramContext(TransferAccounts)) !void {
+fn transfer(ctx: zero.ProgramContext(TransferAccounts)) !void {
     // Get typed arguments (skip 8-byte discriminator automatically)
     const args = ctx.args(AmountArgs);
     
@@ -140,7 +140,7 @@ fn transfer(ctx: *zero.ProgramContext(TransferAccounts)) !void {
 }
 
 /// Mint tokens via CPI to SPL Token Program
-fn mintTo(ctx: *zero.ProgramContext(MintToAccounts)) !void {
+fn mintTo(ctx: zero.ProgramContext(MintToAccounts)) !void {
     const args = ctx.args(AmountArgs);
     const accs = ctx.accounts();
     
@@ -153,7 +153,7 @@ fn mintTo(ctx: *zero.ProgramContext(MintToAccounts)) !void {
 }
 
 /// Burn tokens via CPI to SPL Token Program
-fn burn(ctx: *zero.ProgramContext(BurnAccounts)) !void {
+fn burn(ctx: zero.ProgramContext(BurnAccounts)) !void {
     const args = ctx.args(AmountArgs);
     const accs = ctx.accounts();
     
@@ -166,7 +166,7 @@ fn burn(ctx: *zero.ProgramContext(BurnAccounts)) !void {
 }
 
 /// Close token account via CPI to SPL Token Program
-fn close(ctx: *zero.ProgramContext(CloseAccounts)) !void {
+fn close(ctx: zero.ProgramContext(CloseAccounts)) !void {
     const accs = ctx.accounts();
     
     try spl.token.close(

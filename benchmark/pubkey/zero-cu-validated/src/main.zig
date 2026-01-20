@@ -30,7 +30,7 @@ pub const Program = struct {
     pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
         // ctx.validate() already called by entryValidated
         // Just access the data
-        _ = ctx.accounts.target.get().value;
+        _ = ctx.accounts().target.get().value;
     }
 };
 

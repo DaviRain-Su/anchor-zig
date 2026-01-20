@@ -23,7 +23,7 @@ const CheckAccounts = struct {
 pub const Program = struct {
     /// Check if account id equals owner id
     pub fn check(ctx: zero.Ctx(CheckAccounts)) !void {
-        const target = ctx.accounts.target;
+        const target = ctx.accounts().target;
         if (!target.id().equals(target.ownerId().*)) {
             return error.InvalidKey;
         }

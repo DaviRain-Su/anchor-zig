@@ -30,7 +30,7 @@ const AllocateArgs = struct {
 // Handler
 // ============================================================================
 
-fn allocateHandler(ctx: *const zero.Ctx(AllocateAccounts)) !void {
+fn allocateHandler(ctx: zero.Ctx(AllocateAccounts)) !void {
     const args = ctx.args(AllocateArgs);
     const allocated = ctx.accounts().allocated;
 
