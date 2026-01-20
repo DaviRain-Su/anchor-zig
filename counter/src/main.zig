@@ -53,8 +53,8 @@ pub const InitializeAccounts = struct {
     payer: zero.Signer(0),
     /// Counter account to initialize (writable)
     counter: zero.Mut(COUNTER_SIZE),
-    /// System program for account creation
-    system_program: zero.Readonly(0),
+    /// System program for account creation (renamed to avoid dynamic parsing)
+    sys_account: zero.Readonly(0),
 };
 
 /// Accounts for increment instruction  
@@ -138,16 +138,15 @@ pub const Program = struct {
 };
 
 // ============================================================================
-// Instruction Handlers
+// Instruction Handlers (using zero.Ctx - value type API)
 // ============================================================================
 
 /// Initialize a new counter account
-fn initialize(ctx: *zero.ProgramContext(InitializeAccounts)) !void {
+fn initialize(ctx: zero.Ctx(InitializeAccounts)) !void {
     const args = ctx.args(InitializeArgs);
-    const accs = ctx.accounts();
     
     // Get counter data pointer (skip 8-byte discriminator)
-    const counter_data = accs.counter.dataSlice();
+    const counter_data = ctx.accounts.counter.dataSlice();
     if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
     
     // Write discriminator
@@ -161,12 +160,11 @@ fn initialize(ctx: *zero.ProgramContext(InitializeAccounts)) !void {
 }
 
 /// Increment the counter
-fn increment(ctx: *zero.ProgramContext(IncrementAccounts)) !void {
+fn increment(ctx: zero.Ctx(IncrementAccounts)) !void {
     const args = ctx.args(IncrementArgs);
-    const accs = ctx.accounts();
     
     // Get counter data
-    const counter_data = accs.counter.dataSlice();
+    const counter_data = ctx.accounts.counter.dataSlice();
     if (counter_data.len < COUNTER_SIZE) return error.InvalidAccountData;
     
     // Read current count
@@ -182,18 +180,16 @@ fn increment(ctx: *zero.ProgramContext(IncrementAccounts)) !void {
 }
 
 /// Close the counter account
-fn close(ctx: *zero.ProgramContext(CloseAccounts)) !void {
-    const accs = ctx.accounts();
-    
+fn close(ctx: zero.Ctx(CloseAccounts)) !void {
     // Transfer lamports to destination
-    const counter_lamports = accs.counter.lamports();
-    const dest_lamports = accs.destination.lamports();
+    const counter_lamports = ctx.accounts.counter.lamports();
+    const dest_lamports = ctx.accounts.destination.lamports();
     
     dest_lamports.* += counter_lamports.*;
     counter_lamports.* = 0;
     
     // Zero out counter data and assign to system program
-    const counter_data = accs.counter.dataSlice();
+    const counter_data = ctx.accounts.counter.dataSlice();
     @memset(@constCast(counter_data), 0);
 }
 

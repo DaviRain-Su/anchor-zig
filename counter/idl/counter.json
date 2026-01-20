@@ -33,7 +33,7 @@
           "signer": false
         },
         {
-          "name": "system_program",
+          "name": "sys_account",
           "writable": false,
           "signer": false
         }
