@@ -208,6 +208,8 @@ pub fn SignerWithConstraints(comptime DataOrLen: anytype, comptime constraints: 
         pub const is_signer = true;
         pub const is_writable = true;
         pub const has_typed_data = info.has_type;
+        /// Signer accounts with explicit size (including 0) have fixed/known sizes
+        pub const is_fixed_size = true;
         pub const CONSTRAINTS = AccountConstraints{
             .signer = true,
             .writable = true,
@@ -234,6 +236,8 @@ pub fn MutWithConstraints(comptime DataOrLen: anytype, comptime constraints: Acc
         pub const is_signer = constraints.signer;
         pub const is_writable = true;
         pub const has_typed_data = info.has_type;
+        /// Accounts with explicit size specification have fixed/known sizes
+        pub const is_fixed_size = true;
         pub const CONSTRAINTS = AccountConstraints{
             .signer = constraints.signer,
             .writable = true,
@@ -264,6 +268,8 @@ pub fn ReadonlyWithConstraints(comptime DataOrLen: anytype, comptime constraints
         pub const is_signer = constraints.signer;
         pub const is_writable = false;
         pub const has_typed_data = info.has_type;
+        /// Accounts with explicit size specification have fixed/known sizes
+        pub const is_fixed_size = true;
         pub const CONSTRAINTS = AccountConstraints{
             .signer = constraints.signer,
             .writable = false,
@@ -316,6 +322,8 @@ pub fn Program(comptime program_id: PublicKey) type {
         pub const is_signer = false;
         pub const is_writable = false;
         pub const has_typed_data = false;
+        /// Program accounts have variable size (executable data), need dynamic parsing
+        pub const is_fixed_size = false;
         pub const CONSTRAINTS = AccountConstraints{
             .address = program_id,
         };
@@ -703,15 +711,22 @@ pub fn ZeroAccountTyped(
 fn needsDynamicParsing(comptime Accounts: type) bool {
     const fields = std.meta.fields(Accounts);
     for (fields) |field| {
-        // If any account has data_size = 0, it's likely an external account
-        // (wallet, system program, etc.) with unknown actual size
+        // Check if account has fixed/known size
+        if (@hasDecl(field.type, "is_fixed_size")) {
+            if (field.type.is_fixed_size) {
+                // This account type has a fixed size, even if data_size = 0
+                continue;
+            }
+        }
+        // If data_size = 0 and not marked as fixed, it's an external account
+        // with unknown actual size (e.g., Program types)
         if (@hasDecl(field.type, "data_size")) {
             if (field.type.data_size == 0) {
                 return true; // External account with unknown size
             }
         }
     }
-    // All accounts have known non-zero sizes - can use static offsets
+    // All accounts have known sizes - can use static offsets
     return false;
 }
 
