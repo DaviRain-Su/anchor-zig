@@ -680,12 +680,28 @@ pub fn ZeroAccountTyped(
 // Instruction Context with Auto-Validation
 // ============================================================================
 
-/// Check if an Accounts struct needs CPI (has program accounts with unknown data size)
+/// Check if an Accounts struct needs dynamic parsing
+/// 
+/// Static offset calculation requires knowing exact data sizes of ALL accounts.
+/// This is only possible when:
+/// 1. All accounts have explicitly specified data sizes > 0
+/// 2. No external accounts with unknown sizes (wallets, programs, etc.)
+///
+/// In practice, most programs need at least a signer (wallet) which has 0 bytes,
+/// and static calculation assumes 0 means "unknown external account".
 fn needsDynamicParsing(comptime Accounts: type) bool {
-    // Always use dynamic parsing for now - static offset calculation
-    // doesn't work correctly with real account data sizes
-    _ = Accounts;
-    return true;
+    const fields = std.meta.fields(Accounts);
+    for (fields) |field| {
+        // If any account has data_size = 0, it's likely an external account
+        // (wallet, system program, etc.) with unknown actual size
+        if (@hasDecl(field.type, "data_size")) {
+            if (field.type.data_size == 0) {
+                return true; // External account with unknown size
+            }
+        }
+    }
+    // All accounts have known non-zero sizes - can use static offsets
+    return false;
 }
 
 /// Context type for program() handlers

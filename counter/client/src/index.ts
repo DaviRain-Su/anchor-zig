@@ -5,7 +5,7 @@ import * as anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 
 const PROGRAM_ID = new anchor.web3.PublicKey(
-  "2smXrB4qF2bosysFwE2rQPTLtMLxfat9wuhTSn3JSTf5",
+  "AfDpoZn25onjqwoWVCZHjqfpC45MUPngbdZEFX9uTTqu",
 );
 
 const IDL_PATH = path.resolve(
