@@ -1399,7 +1399,7 @@ fn entryWithValidation(
                 const ctx = ProgramContext(Accounts).init(context);
                 
                 if (auto_validate) {
-                    @constCast(&ctx).validate() catch return 1;
+                    ctx.validate() catch return 1;
                 }
                 
                 if (handler(ctx)) |_| return 0 else |_| return 1;
